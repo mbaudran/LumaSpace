@@ -86,6 +86,16 @@ final class CaptureService {
 
     func texture(for key: SourceKey) -> MTLTexture? { streams[key]?.texture }
 
+    /// Width / height of a source, from the last shareable-content refresh.
+    func aspect(of key: SourceKey) -> Double? {
+        let size: CGSize? = switch key {
+        case .display(let id): content?.displays.first { $0.displayID == id }.map { CGSize(width: $0.width, height: $0.height) }
+        case .window(let id): content?.windows.first { $0.windowID == id }?.frame.size
+        }
+        guard let size, size.height > 0 else { return nil }
+        return Double(size.width / size.height)
+    }
+
     /// Starts a stream for every available panel source and stops streams nothing uses.
     func sync(panels: [Panel]) {
         let wanted = Set(panels.filter(\.available).compactMap(\.source.key))

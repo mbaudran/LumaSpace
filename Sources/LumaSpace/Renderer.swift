@@ -52,7 +52,10 @@ final class Renderer: NSObject, MTKViewDelegate {
     var headOrientation: () -> Quat = { .identity }
     var textureFor: (UUID) -> MTLTexture? = { _ in nil }
     var onFrame: ((MTLTexture, MTLCommandBuffer) -> Void)?
+    /// A small ring at the centre of view while grabbing (⌃⌥ held).
+    var showReticle = false
     private var labelCache: [String: MTLTexture] = [:]
+    private lazy var reticle: MTLTexture? = makeReticle()
 
     init?(view: MTKView, scene: SpatialScene) {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
@@ -110,10 +113,34 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setFragmentTexture(tex, index: 0)
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         }
+        if showReticle, let tex = reticle {
+            let h = headOrientation()
+            let model = translation(h.rotate(Vec3(x: 0, y: 0, z: -1))) * h.matrix * scale(0.03, 0.03)
+            var u = PanelUniforms(mvp: vp * model, aspect: 1, selected: 0, dim: 0)
+            enc.setVertexBytes(&u, length: MemoryLayout<PanelUniforms>.stride, index: 0)
+            enc.setFragmentBytes(&u, length: MemoryLayout<PanelUniforms>.stride, index: 0)
+            enc.setFragmentTexture(tex, index: 0)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
         enc.endEncoding()
         onFrame?(drawable.texture, cmd)
         cmd.present(drawable)
         cmd.commit()
+    }
+
+    private func makeReticle() -> MTLTexture? {
+        let n = 64
+        guard let ctx = CGContext(data: nil, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                      | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+        ctx.setStrokeColor(CGColor(red: 0.35, green: 0.65, blue: 1, alpha: 1))
+        ctx.setLineWidth(6)
+        ctx.strokeEllipse(in: CGRect(x: 8, y: 8, width: n - 16, height: n - 16))
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: n, height: n, mipmapped: false)
+        guard let tex = device.makeTexture(descriptor: desc), let data = ctx.data else { return nil }
+        tex.replace(region: MTLRegionMake2D(0, 0, n, n), mipmapLevel: 0, withBytes: data, bytesPerRow: n * 4)
+        return tex
     }
 
     /// Placeholder card: the source name, or "Source unavailable" when it's gone.
