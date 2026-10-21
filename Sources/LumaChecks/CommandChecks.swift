@@ -17,6 +17,11 @@ func commandChecks() {
     check("nonsense matches nothing") {
         expect(paletteMatches("zzzz", in: Command.all).isEmpty)
     }
+    check("resize commands exist and are findable") {
+        expectEqual(Command.resizeSelected(1.1).title, "Bigger")
+        expectEqual(Command.resizeSelected(1 / 1.1).title, "Smaller")
+        expectEqual(paletteMatches("big", in: Command.all).first, .resizeSelected(1.1))
+    }
     check("keywords match: 'center' finds Recenter") {
         expect(paletteMatches("center", in: Command.all).contains(.recenter))
     }

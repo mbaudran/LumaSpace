@@ -3,7 +3,7 @@ import LumaCore
 
 /// Debug aid for verification without Accessibility permission:
 /// `LUMA_DEMO=triple-drag` applies Triple, drags the right screen 15° away, then back to 1° from its neighbour
-/// (snapping should close the gap).
+/// (snapping should close the gap). `LUMA_DEMO=palette` opens the palette, types "tri" and runs the top match.
 @MainActor
 enum Demo {
     static func runIfRequested(_ app: AppController) {
@@ -20,6 +20,9 @@ enum Demo {
                 g.drag(scene: app.scene, dx: -140, dy: 0)  // back to 1° gap
                 g.end()
                 app.markDirty()
+            case "palette":
+                app.showPalette()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { app.palette.runQuery("tri") }
             default:
                 NSLog("LumaSpace: unknown LUMA_DEMO \(demo)")
             }

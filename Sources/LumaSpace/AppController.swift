@@ -20,6 +20,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var permissionView: PermissionView?
     let grab = Grab()
     let picker = SourcePicker()
+    let palette = PaletteWindow()
+    var hotkeys: Hotkeys?
+    private var menuBar: MenuBarController?
     private var grabMouse: NSPoint?
     /// Called after any command so menus can refresh their checkmarks and sliders.
     var onStateChange: () -> Void = {}
@@ -83,6 +86,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         Snapshot.installIfRequested(renderer: renderer, view: view)
         Demo.runIfRequested(self)
+        palette.run = { [unowned self] c in self.perform(c) }
+        hotkeys = Hotkeys { [unowned self] action in
+            switch action {
+            case .palette: self.palette.isVisible ? self.palette.hide() : self.showPalette()
+            case .command(let c): self.perform(c)
+            }
+        }
+        menuBar = MenuBarController(app: self)
 
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
@@ -93,7 +104,21 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
+    /// LumaSpace lives in the menu bar; closing the preview doesn't quit it.
+    func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
+
+    func showPreview() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func showPalette() { palette.show(over: window) }
+
+    func setDistance(_ d: Double) {
+        distance = min(max(d, SceneLimits.distance.lowerBound), SceneLimits.distance.upperBound)
+        scene.setDistance(distance)
+        markDirty()
+    }
 
     func applicationWillTerminate(_ n: Notification) {
         dirty = true
@@ -147,9 +172,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         switch c {
         case .recenter: recenter()
         case .applyPreset(let preset): apply(preset)
-        case .nudgeDistance(let d):
-            distance = min(max(distance + d, SceneLimits.distance.lowerBound), SceneLimits.distance.upperBound)
-            scene.setDistance(distance)
+        case .nudgeDistance(let d): setDistance(distance + d)
+        case .resizeSelected(let f):
+            if let id = scene.selectedID, let p = scene.panel(id) { scene.resize(id, width: p.width * f) }
         case .adjustLevel(let k, let d): glasses.setLevel(k, (glasses.level(k) ?? 0) + d)
         case .setRate(let r): glasses.setRate(r)
         case .toggleSmoothFollow: tracker.smoothFollow.toggle()

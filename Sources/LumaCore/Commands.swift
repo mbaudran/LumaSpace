@@ -5,6 +5,7 @@ public enum Command: Hashable, Sendable {
     case recenter
     case applyPreset(Preset)
     case nudgeDistance(Double)
+    case resizeSelected(Double)
     case adjustLevel(LevelKind, Int)
     case setRate(DisplayRate)
     case toggleSmoothFollow
@@ -21,6 +22,7 @@ public enum Command: Hashable, Sendable {
         case .recenter: "Recenter"
         case .applyPreset(let p): "Layout: \(p.title)"
         case .nudgeDistance(let d): d < 0 ? "Closer" : "Farther"
+        case .resizeSelected(let f): f > 1 ? "Bigger" : "Smaller"
         case .adjustLevel(let k, let d): "\(k == .brightness ? "Brightness" : "Volume") \(d > 0 ? "+" : "−")"
         case .setRate(let r): "Refresh \(r.rawValue) Hz"
         case .toggleSmoothFollow: "Smooth Follow"
@@ -39,6 +41,7 @@ public enum Command: Hashable, Sendable {
         case .recenter: ["center", "reset", "origin"]
         case .applyPreset(let p): ["layout", "preset", p.rawValue]
         case .nudgeDistance: ["distance", "zoom"]
+        case .resizeSelected: ["size", "scale", "resize"]
         case .adjustLevel(let k, _): k == .brightness ? ["light", "dim"] : ["sound", "audio"]
         case .setRate: ["hz", "rate", "fps"]
         case .toggleSmoothFollow: ["follow", "drift"]
@@ -54,7 +57,7 @@ public enum Command: Hashable, Sendable {
     public static var all: [Command] {
         [.recenter]
             + Preset.allCases.map { .applyPreset($0) }
-            + [.nudgeDistance(-0.25), .nudgeDistance(0.25),
+            + [.nudgeDistance(-0.25), .nudgeDistance(0.25), .resizeSelected(1.1), .resizeSelected(1 / 1.1),
                .adjustLevel(.brightness, 1), .adjustLevel(.brightness, -1),
                .adjustLevel(.volume, 1), .adjustLevel(.volume, -1)]
             + DisplayRate.allCases.map { .setRate($0) }
