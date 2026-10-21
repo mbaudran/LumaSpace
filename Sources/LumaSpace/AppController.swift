@@ -23,6 +23,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     let palette = PaletteWindow()
     var hotkeys: Hotkeys?
     private var menuBar: MenuBarController?
+    private let sdk = VitureLibrary.load()
+    private var glassesWindow: NSWindow?
+    private var missedPolls = 0
     private var grabMouse: NSPoint?
     /// Called after any command so menus can refresh their checkmarks and sliders.
     var onStateChange: () -> Void = {}
@@ -77,8 +80,13 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         Task { await self.refreshSources() }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refreshSources() }
+            Task { @MainActor in
+                self?.pollGlasses()
+                await self?.refreshSources()
+            }
         }
+        pollGlasses()
+        NSLog("LumaSpace: \(glasses.status.text)")
 
         tracker.recenter(to: .identity)
         if let yaw = ProcessInfo.processInfo.environment["LUMA_SIM_YAW"].flatMap(Double.init) {
@@ -112,7 +120,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func showPalette() { palette.show(over: window) }
+    func showPalette() { palette.show(over: glassesWindow ?? window) }
 
     func setDistance(_ d: Double) {
         distance = min(max(d, SceneLimits.distance.lowerBound), SceneLimits.distance.upperBound)
@@ -217,10 +225,82 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func recenter() { tracker.recenter(to: glasses.rawOrientation()) }
 
+    private func devicePIDs() -> [Int] {
+        guard let sdk else { return [] }
+        return findVitureDevicePIDs { sdk.isProductIDValid($0) }
+    }
+
+    /// Connects real glasses when they appear; falls back to the simulator after two missed polls.
+    func pollGlasses() {
+        let pids = devicePIDs()
+        if let real = glasses as? VitureGlasses {
+            missedPolls = pids.contains(real.pid) ? 0 : missedPolls + 1
+            if missedPolls >= 2 {
+                NSLog("LumaSpace: glasses disconnected")
+                useSimulator(reason: "Glasses not connected")
+            } else if glassesWindow == nil {
+                moveOutputToGlasses()  // the display can show up after USB does
+            }
+            return
+        }
+        switch chooseGlasses(libraryLoaded: sdk != nil, devicePIDs: pids) {
+        case .real(let pid):
+            guard let sdk, let g = VitureGlasses(library: sdk, pid: pid) else { return }
+            glasses.stop()
+            glasses = g
+            g.onEvent = { [unowned self] _ in self.onStateChange() }
+            view.simulator = nil
+            missedPolls = 0
+            moveOutputToGlasses()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.recenter() }
+            onStateChange()
+        case .simulated(let reason):
+            if glasses.status != .simulated(reason: reason) { useSimulator(reason: reason) }
+        }
+    }
+
+    private func useSimulator(reason: String) {
+        glasses.stop()
+        let sim = SimulatedGlasses(reason: reason)
+        glasses = sim
+        view.simulator = sim
+        moveOutputToPreview()
+        tracker.recenter(to: .identity)
+        onStateChange()
+    }
+
+    private func moveOutputToGlasses() {
+        guard let screen = OutputWindow.glassesScreen() else {
+            NSLog("LumaSpace: glasses connected but no VITURE display found; keeping the preview")
+            return
+        }
+        let w = OutputWindow.fullscreen(on: screen)
+        view.removeFromSuperview()
+        view.frame = w.contentView!.bounds
+        w.contentView!.addSubview(view)
+        view.preferredFramesPerSecond = 120
+        w.orderFrontRegardless()
+        window.orderOut(nil)
+        glassesWindow = w
+    }
+
+    private func moveOutputToPreview() {
+        guard let gw = glassesWindow else { return }
+        view.removeFromSuperview()
+        view.frame = window.contentView!.bounds
+        window.contentView!.addSubview(view, positioned: .below, relativeTo: nil)
+        view.preferredFramesPerSecond = 60
+        gw.orderOut(nil)
+        glassesWindow = nil
+        window.makeKeyAndOrderFront(nil)
+    }
+
     /// Re-reads available windows/displays, flags lost sources and keeps capture streams in sync.
     func refreshSources() async {
         guard CaptureService.hasPermission else { return }
         if let pv = permissionView { pv.removeFromSuperview(); permissionView = nil }
+        capture.glassesDisplayID = OutputWindow.glassesScreen()
+            .flatMap { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value }
         let r = await capture.refresh()
         offeredSources = r.offered
         // A fresh layout of placeholders starts by showing the main display.

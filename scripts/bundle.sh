@@ -12,6 +12,8 @@ cp .build/release/LumaSpace "$app/Contents/MacOS/LumaSpace"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 if [ -f vendor/viture-sdk/aarch64/libglasses.dylib ]; then
     cp vendor/viture-sdk/aarch64/libglasses.dylib "$app/Contents/Frameworks/"
+    # The SDK zip comes from a browser download; macOS refuses to load a quarantined dylib.
+    xattr -d com.apple.quarantine "$app/Contents/Frameworks/libglasses.dylib" 2>/dev/null || true
 else
     echo "note: vendor/viture-sdk/aarch64/libglasses.dylib not found — app will run in simulator mode"
 fi
