@@ -1,4 +1,5 @@
 import Foundation
+import QuartzCore
 import IOKit
 import IOKit.usb
 import LumaCore
@@ -136,6 +137,8 @@ func findVitureDevicePIDs(isValid: (Int32) -> Bool) -> [Int] {
 private final class SDKState: @unchecked Sendable {
     static let shared = SDKState()
     let pose = OSAllocatedUnfairLock(initialState: Quat.identity)
+    /// CACurrentMediaTime of the newest pose sample; nil until the first one arrives.
+    let lastSample = OSAllocatedUnfairLock<Double?>(initialState: nil)
     let onState = OSAllocatedUnfairLock<(@Sendable (Int32, Int32) -> Void)?>(initialState: nil)
 }
 
@@ -143,6 +146,8 @@ private let posCallback: PoseCallback = { data, _ in
     guard let d = data else { return }
     let q = renderQuat(fromNWU: Double(d[3]), Double(d[4]), Double(d[5]), Double(d[6])).normalized
     SDKState.shared.pose.withLock { $0 = q }
+    let now = CACurrentMediaTime()
+    SDKState.shared.lastSample.withLock { $0 = now }
 }
 
 private let stateCallback: StateCallback = { id, value in
@@ -158,11 +163,14 @@ final class VitureGlasses: @MainActor GlassesLink {
     private let lib: VitureLibrary
     private var handle: Handle?
     private var imuOpen = false
+    let connectedAt = CACurrentMediaTime()
 
     init?(library lib: VitureLibrary, pid: Int) {
         self.lib = lib
         self.pid = pid
         status = .connected(name: lib.name(of: pid))
+        SDKState.shared.pose.withLock { $0 = .identity }
+        SDKState.shared.lastSample.withLock { $0 = nil }
         guard let h = lib.create(Int32(pid)) else { return nil }
         handle = h
         let cache = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -195,6 +203,11 @@ final class VitureGlasses: @MainActor GlassesLink {
     }
 
     nonisolated func rawOrientation() -> Quat { SDKState.shared.pose.withLock { $0 } }
+
+    /// Seconds since the last pose sample, or nil if none has arrived yet.
+    var sampleAge: Double? {
+        SDKState.shared.lastSample.withLock { $0 }.map { CACurrentMediaTime() - $0 }
+    }
 
     func level(_ k: LevelKind) -> Int? {
         guard let h = handle else { return nil }
@@ -229,6 +242,7 @@ final class VitureGlasses: @MainActor GlassesLink {
 
     private func teardown() {
         SDKState.shared.onState.withLock { $0 = nil }
+        SDKState.shared.lastSample.withLock { $0 = nil }
         guard let h = handle else { return }
         if imuOpen { _ = lib.closeIMU(h, viturePoseMode); imuOpen = false }
         _ = lib.stop(h)

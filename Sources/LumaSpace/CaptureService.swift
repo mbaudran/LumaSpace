@@ -7,7 +7,7 @@ import LumaCore
 /// One running SCStream; keeps the newest frame as a Metal texture.
 private final class StreamBox: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let key: SourceKey
-    let stream: SCStream
+    private(set) var stream: SCStream!
     private let cache: CVMetalTextureCache
     private let lock = NSLock()
     private var latest: (CVMetalTexture, MTLTexture)?
@@ -16,8 +16,9 @@ private final class StreamBox: NSObject, SCStreamOutput, SCStreamDelegate, @unch
     init(key: SourceKey, filter: SCContentFilter, config: SCStreamConfiguration, cache: CVMetalTextureCache) {
         self.key = key
         self.cache = cache
-        stream = SCStream(filter: filter, configuration: config, delegate: nil)
         super.init()
+        // Delegate is needed so system-initiated stops (screen lock, "Stop sharing") reach didStopWithError.
+        stream = SCStream(filter: filter, configuration: config, delegate: self)
     }
 
     var texture: MTLTexture? { lock.lock(); defer { lock.unlock() }; return latest?.1 }
@@ -50,6 +51,8 @@ final class CaptureService {
     /// Called on the main actor when a running stream dies (window closed, display unplugged).
     var onSourceLost: (SourceKey) -> Void = { _ in }
     var glassesDisplayID: UInt32?
+    /// Sources whose stream failed to start are retried at most every 10 s.
+    private let retry = RetryGate<SourceKey>(delay: 10)
 
     init(device: MTLDevice) {
         self.device = device
@@ -104,14 +107,17 @@ final class CaptureService {
             streams[key] = nil
         }
         guard let content, let cache else { return }
-        let own = content.windows.filter { $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier }
-        for key in wanted where streams[key] == nil {
+        // Exclude the whole app, not a window list: windows created later (the glasses output,
+        // palette, picker) must never appear inside a display capture.
+        let me = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+        let now = CACurrentMediaTime()
+        for key in wanted where streams[key] == nil && retry.allowed(key, now: now) {
             let filter: SCContentFilter
             let size: CGSize
             switch key {
             case .display(let id):
                 guard let d = content.displays.first(where: { $0.displayID == id }) else { continue }
-                filter = SCContentFilter(display: d, excludingWindows: own)
+                filter = SCContentFilter(display: d, excludingApplications: me, exceptingWindows: [])
                 size = CGSize(width: d.width, height: d.height)
             case .window(let id):
                 guard let w = content.windows.first(where: { $0.windowID == id }) else { continue }
@@ -132,6 +138,7 @@ final class CaptureService {
             box.onStop = { [weak self] k in
                 Task { @MainActor in
                     self?.streams[k] = nil
+                    self?.retry.failed(k, now: CACurrentMediaTime())
                     self?.onSourceLost(k)
                 }
             }
@@ -143,10 +150,11 @@ final class CaptureService {
             }
             streams[key] = box
             box.stream.startCapture { [weak self] err in
-                guard let err else { return }
-                NSLog("LumaSpace: capture failed for \(key): \(err.localizedDescription)")
                 Task { @MainActor in
+                    guard let err else { self?.retry.succeeded(key); return }
+                    NSLog("LumaSpace: capture failed for \(key): \(err.localizedDescription)")
                     self?.streams[key] = nil
+                    self?.retry.failed(key, now: CACurrentMediaTime())
                     self?.onSourceLost(key)
                 }
             }

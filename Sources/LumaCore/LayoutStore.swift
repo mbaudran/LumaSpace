@@ -30,7 +30,10 @@ public struct LayoutStore: Sendable {
     /// Missing file → default. Unreadable or unknown version → default, and the file is kept as `.bad`.
     public func load() -> LayoutFile {
         guard let data = try? Data(contentsOf: url) else { return .default }
-        if let f = try? JSONDecoder().decode(LayoutFile.self, from: data), f.version == 1 { return f }
+        if var f = try? JSONDecoder().decode(LayoutFile.self, from: data), f.version == 1 {
+            f.distance = f.distance.isFinite ? clamp(f.distance, SceneLimits.distance) : 2
+            return f
+        }
         let bad = URL(fileURLWithPath: url.path + ".bad")
         try? FileManager.default.removeItem(at: bad)
         try? FileManager.default.moveItem(at: url, to: bad)

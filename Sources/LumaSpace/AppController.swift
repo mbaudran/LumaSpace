@@ -27,6 +27,10 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var glassesWindow: NSWindow?
     private var missedPolls = 0
     private var grabMouse: NSPoint?
+    private var grabArming = GrabArming()
+    /// Glasses that couldn't be opened (e.g. SpaceWalker holds them) are retried every 15 s, not every poll.
+    private let bringUp = RetryGate<Int>(delay: 15)
+    private var recenterOnFirstSample = false
     /// Called after any command so menus can refresh their checkmarks and sliders.
     var onStateChange: () -> Void = {}
 
@@ -87,6 +91,12 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         pollGlasses()
         NSLog("LumaSpace: \(glasses.status.text)")
+        // Mirroring or unplugging the VITURE display moves our borderless window onto the Mac screen;
+        // leave the glasses output immediately rather than at the next USB poll.
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screensChanged() }
+        }
 
         tracker.recenter(to: .identity)
         if let yaw = ProcessInfo.processInfo.environment["LUMA_SIM_YAW"].flatMap(Double.init) {
@@ -96,6 +106,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         Demo.runIfRequested(self)
         palette.run = { [unowned self] c in self.perform(c) }
         hotkeys = Hotkeys { [unowned self] action in
+            self.grabArming.cancelUntilRelease()  // ⌃⌥ was for a shortcut, not a grab
             switch action {
             case .palette: self.palette.isVisible ? self.palette.hide() : self.showPalette()
             case .command(let c): self.perform(c)
@@ -138,6 +149,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         let now = CACurrentMediaTime()
         let dt = min(now - lastFrame, 0.1)
         lastFrame = now
+        if recenterOnFirstSample, let real = glasses as? VitureGlasses, real.sampleAge != nil {
+            recenterOnFirstSample = false
+            recenter()
+        }
         head = tracker.update(raw: glasses.rawOrientation(), dt: dt)
         updateGrab()
         return head
@@ -152,7 +167,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Holding ⌃⌥ grabs the panel at the centre of view; mouse movement moves it.
     /// Polled each frame: global event monitors would need Accessibility permission.
     private func updateGrab() {
-        let held = NSEvent.modifierFlags.intersection([.control, .option, .command, .shift]) == [.control, .option]
+        let down = NSEvent.modifierFlags.intersection([.control, .option, .command, .shift]) == [.control, .option]
+        let held = grabArming.update(held: down, now: CACurrentMediaTime())
         let mouse = NSEvent.mouseLocation
         switch (held, grabMouse) {
         case (true, nil):
@@ -209,7 +225,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func addSource() {
         Task {
             await refreshSources()
-            picker.present(sources: offeredSources, over: window) { source in
+            picker.present(sources: offeredSources, over: glassesWindow ?? window) { source in
                 guard let source else { return }
                 let g = self.gaze
                 let aspect = source.key.flatMap { self.capture.aspect(of: $0) } ?? 16.0 / 9
@@ -235,9 +251,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         let pids = devicePIDs()
         if let real = glasses as? VitureGlasses {
             missedPolls = pids.contains(real.pid) ? 0 : missedPolls + 1
-            if missedPolls >= 2 {
-                NSLog("LumaSpace: glasses disconnected")
-                useSimulator(reason: "Glasses not connected")
+            if glassesLost(missedPolls: missedPolls, sampleAge: real.sampleAge,
+                           connectedFor: CACurrentMediaTime() - real.connectedAt) {
+                NSLog("LumaSpace: glasses disconnected or pose stream stopped")
+                useSimulator(reason: "Glasses not connected")  // the next poll reconnects if they're back
             } else if glassesWindow == nil {
                 moveOutputToGlasses()  // the display can show up after USB does
             }
@@ -245,17 +262,35 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         switch chooseGlasses(libraryLoaded: sdk != nil, devicePIDs: pids) {
         case .real(let pid):
-            guard let sdk, let g = VitureGlasses(library: sdk, pid: pid) else { return }
+            let now = CACurrentMediaTime()
+            // While backing off, keep showing the "couldn't be opened" status.
+            guard let sdk, bringUp.allowed(pid, now: now) else { return }
+            guard let g = VitureGlasses(library: sdk, pid: pid) else {
+                bringUp.failed(pid, now: now)
+                useSimulator(reason: "Glasses found but couldn't be opened — quit SpaceWalker")
+                return
+            }
+            bringUp.succeeded(pid)
             glasses.stop()
             glasses = g
             g.onEvent = { [unowned self] _ in self.onStateChange() }
             view.simulator = nil
             missedPolls = 0
             moveOutputToGlasses()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.recenter() }
+            recenterOnFirstSample = true
             onStateChange()
         case .simulated(let reason):
             if glasses.status != .simulated(reason: reason) { useSimulator(reason: reason) }
+        }
+    }
+
+    /// Leaves the glasses output as soon as the VITURE display goes away or turns into a mirror.
+    private func screensChanged() {
+        guard let gw = glassesWindow else { return }
+        let screen = OutputWindow.usableGlassesScreen()
+        if screen == nil || gw.screen != screen {
+            NSLog("LumaSpace: VITURE display gone or mirrored; back to the preview")
+            moveOutputToPreview()
         }
     }
 
@@ -270,8 +305,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func moveOutputToGlasses() {
-        guard let screen = OutputWindow.glassesScreen() else {
-            NSLog("LumaSpace: glasses connected but no VITURE display found; keeping the preview")
+        guard let screen = OutputWindow.usableGlassesScreen() else {
+            NSLog("LumaSpace: glasses connected but no extended VITURE display; keeping the preview")
             return
         }
         let w = OutputWindow.fullscreen(on: screen)

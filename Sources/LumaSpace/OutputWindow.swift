@@ -25,4 +25,14 @@ enum OutputWindow {
     static func glassesScreen() -> NSScreen? {
         NSScreen.screens.first { $0.localizedName.range(of: "VITURE", options: .caseInsensitive) != nil }
     }
+
+    /// The VITURE display only when it's extended; a mirrored one would put our output on the Mac screen.
+    static func usableGlassesScreen() -> NSScreen? {
+        guard let s = glassesScreen(), let id = displayID(of: s) else { return nil }
+        return CGDisplayIsInMirrorSet(id) == 0 ? s : nil
+    }
+
+    static func displayID(of screen: NSScreen) -> CGDirectDisplayID? {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+    }
 }

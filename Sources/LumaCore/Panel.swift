@@ -29,6 +29,7 @@ public enum SceneLimits {
     public static let pitch = -75.0...75.0
     public static let distance = 0.5...10.0
     public static let width = 0.2...12.0
+    public static let aspect = 0.1...10.0
 }
 
 /// Wraps degrees into (−180, 180].

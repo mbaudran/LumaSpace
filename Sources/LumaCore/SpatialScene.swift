@@ -15,6 +15,7 @@ public final class SpatialScene {
         p.pitch = clamp(p.pitch, SceneLimits.pitch)
         p.distance = clamp(p.distance, SceneLimits.distance)
         p.width = clamp(p.width, SceneLimits.width)
+        p.aspect = p.aspect.isFinite ? clamp(p.aspect, SceneLimits.aspect) : 16.0 / 9
         panels.append(p)
         return p.id
     }
@@ -36,7 +37,9 @@ public final class SpatialScene {
         let others = panels.filter { !members.contains($0.id) }
         let t = snapped(p, toYaw: yaw, pitch: pitch, others: others, settings: snap)
         let dYaw = wrapYaw(t.yaw - p.yaw)
-        let dPitch = clamp(t.pitch, SceneLimits.pitch) - p.pitch
+        // Limit the pitch change so every member stays in range and the group keeps its shape.
+        let pitches = panels.filter { members.contains($0.id) }.map(\.pitch)
+        let dPitch = clamp(t.pitch - p.pitch, (SceneLimits.pitch.lowerBound - pitches.min()!)...(SceneLimits.pitch.upperBound - pitches.max()!))
         for j in panels.indices where members.contains(panels[j].id) {
             panels[j].yaw = wrapYaw(panels[j].yaw + dYaw)
             panels[j].pitch = clamp(panels[j].pitch + dPitch, SceneLimits.pitch)
