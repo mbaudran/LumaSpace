@@ -4,7 +4,9 @@ import MetalKit
 
 @MainActor
 final class AppController: NSObject, NSApplicationDelegate {
-    let store = LayoutStore(url: LayoutStore.defaultURL())
+    /// `LUMA_LAYOUT=/path.json` points at another layout file (used for testing).
+    let store = LayoutStore(url: ProcessInfo.processInfo.environment["LUMA_LAYOUT"].map { URL(fileURLWithPath: $0) }
+        ?? LayoutStore.defaultURL())
     let scene = SpatialScene()
     let tracker = HeadTracker()
     var glasses: GlassesLink = SimulatedGlasses(reason: "Glasses not connected")
@@ -13,6 +15,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var view: LumaView!
     var renderer: Renderer!
+    var capture: CaptureService!
+    var offeredSources: [PanelSource] = []
+    private var permissionView: PermissionView?
 
     private var head = Quat.identity
     private var lastFrame = CACurrentMediaTime()
@@ -36,6 +41,23 @@ final class AppController: NSObject, NSApplicationDelegate {
         view.simulator = glasses as? SimulatedGlasses
         view.onRecenter = { [unowned self] in self.recenter() }
         view.onEdit = { [unowned self] in self.markDirty() }
+
+        capture = CaptureService(device: renderer.device)
+        capture.onSourceLost = { [unowned self] _ in Task { await self.refreshSources() } }
+        renderer.textureFor = { [unowned self] id in
+            self.scene.panel(id)?.source.key.flatMap { self.capture.texture(for: $0) }
+        }
+        if !CaptureService.hasPermission {
+            let pv = PermissionView()
+            pv.frame = window.contentView!.bounds
+            pv.autoresizingMask = [.width, .height]
+            window.contentView!.addSubview(pv)
+            permissionView = pv
+        }
+        Task { await self.refreshSources() }
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refreshSources() }
+        }
 
         tracker.recenter(to: .identity)
         if let yaw = ProcessInfo.processInfo.environment["LUMA_SIM_YAW"].flatMap(Double.init) {
@@ -69,6 +91,24 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     func recenter() { tracker.recenter(to: glasses.rawOrientation()) }
+
+    /// Re-reads available windows/displays, flags lost sources and keeps capture streams in sync.
+    func refreshSources() async {
+        guard CaptureService.hasPermission else { return }
+        if let pv = permissionView { pv.removeFromSuperview(); permissionView = nil }
+        let r = await capture.refresh()
+        offeredSources = r.offered
+        // A fresh layout of placeholders starts by showing the main display.
+        if scene.panels.allSatisfy({ $0.source.key == nil }), let first = scene.panels.first,
+           let display = r.offered.first(where: { if case .display = $0 { true } else { false } }) {
+            var p = first
+            p.source = display
+            scene.replaceAll([p] + scene.panels.dropFirst())
+            markDirty()
+        }
+        scene.updateAvailability(available: r.existing)
+        capture.sync(panels: scene.panels)
+    }
 
     func markDirty() { dirty = true }
 

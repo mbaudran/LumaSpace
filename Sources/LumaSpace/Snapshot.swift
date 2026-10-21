@@ -8,10 +8,11 @@ enum Snapshot {
     static func installIfRequested(renderer: Renderer, view: MTKView) {
         guard let path = ProcessInfo.processInfo.environment["LUMA_SNAPSHOT"] else { return }
         view.framebufferOnly = false
+        let target = ProcessInfo.processInfo.environment["LUMA_SNAPSHOT_FRAME"].flatMap(Int.init) ?? 30
         var frames = 0
         renderer.onFrame = { texture, cmd in
             frames += 1
-            guard frames == 30 else { return }
+            guard frames == target else { return }
             let w = texture.width, h = texture.height
             cmd.addCompletedHandler { _ in
                 var bytes = [UInt8](repeating: 0, count: w * h * 4)
