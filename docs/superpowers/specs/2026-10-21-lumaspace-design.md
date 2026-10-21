@@ -27,9 +27,17 @@ free-form window layout and fast quick controls.
   shaders are compiled at runtime from source strings
   (`MTLDevice.makeLibrary(source:)`) because the offline `metal` compiler ships
   with Xcode.
-- The SDK ships as `libglasses.dylib` (arm64 macOS). The public docs give no
-  download link; it must be obtained from VITURE's developer portal. Until then
-  `GlassesLink` runs on a simulator implementation.
+- The SDK (VITURE_XR_Glasses_SDK_for_MacOS_arm64, from viture.com/developer)
+  lives in `vendor/viture-sdk/` (git-ignored, not redistributed): headers in
+  `include/`, `aarch64/libglasses.dylib` (system frameworks only, no hidapi).
+  Luma path (Gen1): enumerate USB devices via IOKit for VID `0x35CA` and
+  `xr_device_provider_is_product_id_valid`; `create(pid)` → `initialize` →
+  `start` → `register_imu_pose_callback` + `open_imu(POSE, freq)`; pose is
+  `[roll, pitch, yaw, qw, qx, qy, qz]` in North-West-Up on an SDK thread.
+  Controls: `get/set_brightness_level`, `get/set_volume_level`,
+  `get_value_max`, `get/set_display_mode`, `register_state_callback` for
+  hardware-button changes. The dylib is loaded at runtime (`dlopen`) so the app
+  builds and runs in simulator mode without it.
 - Only one process may own the glasses' IMU, so SpaceWalker must be closed while
   LumaSpace runs.
 
@@ -65,7 +73,7 @@ tests run with `swift test`.
    brightness, volume, distance, recenter, layout presets; global shortcuts.
 4. **Real glasses.** `VitureGlasses` over the SDK; output to the glasses
    display; recenter, drift handling, Smooth Follow; themes/shortcut parity.
-   Blocked until the SDK library and a pair of glasses are available.
+   SDK is in hand; verifying it needs the friend's glasses.
 
 ## Error handling
 
@@ -85,6 +93,8 @@ tests run with `swift test`.
 
 ## Risks
 
-- SDK download availability (blocks stage 4 only).
+- No glasses on the dev machine: SDK integration is compiled and smoke-tested
+  (library loads, enumeration finds nothing), but head tracking is unverified
+  until the friend tests it.
 - Runtime-compiled shaders add a small startup cost; acceptable.
 - Screen capture latency affects perceived quality; measure in stage 1.
