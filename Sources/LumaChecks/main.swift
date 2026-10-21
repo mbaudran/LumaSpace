@@ -1,2 +1,3 @@
 quatChecks()
+headTrackerChecks()
 finishChecks()
