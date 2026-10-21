@@ -4,6 +4,7 @@ import Foundation
 public final class SpatialScene {
     public private(set) var panels: [Panel] = []
     public var selectedID: UUID?
+    public var snap = SnapSettings()
 
     public init(panels: [Panel] = []) { replaceAll(panels) }
 
@@ -27,10 +28,34 @@ public final class SpatialScene {
 
     func index(_ id: UUID) -> Int? { panels.firstIndex { $0.id == id } }
 
+    /// Snaps the dragged panel against panels outside its group, then moves the whole group by the same delta.
     public func move(_ id: UUID, toYaw yaw: Double, pitch: Double) {
         guard let i = index(id) else { return }
-        panels[i].yaw = wrapYaw(yaw)
-        panels[i].pitch = clamp(pitch, SceneLimits.pitch)
+        let p = panels[i]
+        let members = members(of: p)
+        let others = panels.filter { !members.contains($0.id) }
+        let t = snapped(p, toYaw: yaw, pitch: pitch, others: others, settings: snap)
+        let dYaw = wrapYaw(t.yaw - p.yaw)
+        let dPitch = clamp(t.pitch, SceneLimits.pitch) - p.pitch
+        for j in panels.indices where members.contains(panels[j].id) {
+            panels[j].yaw = wrapYaw(panels[j].yaw + dYaw)
+            panels[j].pitch = clamp(panels[j].pitch + dPitch, SceneLimits.pitch)
+        }
+    }
+
+    private func members(of p: Panel) -> Set<UUID> {
+        guard let g = p.groupID else { return [p.id] }
+        return Set(panels.filter { $0.groupID == g }.map(\.id))
+    }
+
+    public func group(_ ids: [UUID]) {
+        let g = UUID()
+        for i in panels.indices where ids.contains(panels[i].id) { panels[i].groupID = g }
+    }
+
+    public func ungroup(_ id: UUID) {
+        guard let i = index(id) else { return }
+        panels[i].groupID = nil
     }
 
     public func resize(_ id: UUID, width: Double) {

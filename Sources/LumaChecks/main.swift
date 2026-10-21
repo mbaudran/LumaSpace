@@ -1,4 +1,5 @@
 quatChecks()
 headTrackerChecks()
 sceneChecks()
+snappingChecks()
 finishChecks()
