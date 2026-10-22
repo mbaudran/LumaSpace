@@ -16,7 +16,9 @@ your head; they don't move when you lean).
    ```sh
    scripts/bundle.sh --install
    ```
-   It stops with an error if it can't find the SDK. Then check it's all in place:
+   It needs Swift 6.0 or later (`swift --version`; update with `xcode-select --install` or
+   Software Update) and stops with an error if it can't find the SDK. To update LumaSpace
+   later, `git pull` (or download the ZIP again) and rerun this step. Then check it's all in place:
    ```sh
    /Applications/LumaSpace.app/Contents/MacOS/LumaSpace --diagnose
    ```

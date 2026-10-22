@@ -3,7 +3,10 @@
 # --sim builds without the VITURE SDK (simulator only).
 set -e
 cd "$(dirname "$0")/.."
-export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
+# Newer Command Line Tools ship a macOS 27 SDK whose macros need Xcode, so prefer 26 when it's
+# installed; otherwise use the default SDK.
+sdk26=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
+if [ -d "$sdk26" ]; then export SDKROOT="$sdk26"; fi
 
 sdk=vendor/viture-sdk/aarch64/libglasses.dylib
 if [ ! -f "$sdk" ]; then

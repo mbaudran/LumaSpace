@@ -1,6 +1,7 @@
 import Foundation
 import LumaCore
 
+@MainActor
 func glassesChecks() {
     check("no SDK library → simulator") {
         expectEqual(chooseGlasses(libraryLoaded: false, devicePIDs: [0x1101]), .simulated(reason: "VITURE SDK not found"))

@@ -181,7 +181,7 @@ private let stateCallback: StateCallback = { id, value in
 
 /// Real VITURE glasses (Gen1 / Luma) driven through the SDK.
 @MainActor
-final class VitureGlasses: @MainActor GlassesLink {
+final class VitureGlasses: GlassesLink {
     let pid: Int
     let status: GlassesStatus
     var onEvent: ((GlassesEvent) -> Void)?

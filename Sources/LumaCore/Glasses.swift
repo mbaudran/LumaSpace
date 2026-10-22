@@ -21,6 +21,7 @@ public enum DisplayRate: Int, CaseIterable, Sendable { case hz60 = 60, hz90 = 90
 public enum GlassesEvent: Sendable { case levelChanged(LevelKind, Int), disconnected }
 
 /// Everything the app needs from a pair of glasses, real or simulated.
+@MainActor
 public protocol GlassesLink: AnyObject {
     var status: GlassesStatus { get }
     /// Latest orientation in the render frame. Safe to call from any thread.
