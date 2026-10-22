@@ -6,10 +6,11 @@ let package = Package(
     platforms: [.macOS(.v14)],
     targets: [
         .target(name: "LumaCore"),
+        .target(name: "CGVirtualDisplayShim"),
         .executableTarget(name: "LumaChecks", dependencies: ["LumaCore"]),
         .executableTarget(
             name: "LumaSpace",
-            dependencies: ["LumaCore"],
+            dependencies: ["LumaCore", "CGVirtualDisplayShim"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Metal"),
@@ -18,6 +19,7 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("CoreVideo"),
+                .linkedFramework("CoreGraphics"),
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
             ]
         ),

@@ -24,6 +24,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     var hotkeys: Hotkeys?
     private var menuBar: MenuBarController?
     private let sdk = VitureLibrary.load()
+    private let virtualDisplays = VirtualDisplays()
     private var glassesWindow: NSWindow?
     private var missedPolls = 0
     private var grabMouse: NSPoint?
@@ -71,6 +72,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
 
         capture = CaptureService(device: renderer.device)
+        syncVirtualScreens()  // recreate the saved layout's virtual screens
         capture.onSourceLost = { [unowned self] _ in Task { await self.refreshSources() } }
         renderer.textureFor = { [unowned self] id in
             self.scene.panel(id)?.source.key.flatMap { self.capture.texture(for: $0) }
@@ -206,7 +208,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             if tracker.lockedAxes.contains(a) { tracker.lockedAxes.remove(a) } else { tracker.lockedAxes.insert(a) }
         case .toggleSnap: scene.snap.enabled.toggle()
         case .addSource: addSource()
-        case .removeSelected: if let id = scene.selectedID { scene.remove(id); capture.sync(panels: scene.panels) }
+        case .newVirtualScreen: newVirtualScreen()
+        case .removeSelected:
+            if let id = scene.selectedID { scene.remove(id); capture.sync(panels: scene.panels); syncVirtualScreens() }
         case .groupAll: scene.group(scene.panels.map(\.id))
         case .ungroupSelected: if let id = scene.selectedID { scene.ungroup(id) }
         case .quit: NSApp.terminate(nil)
@@ -215,11 +219,39 @@ final class AppController: NSObject, NSApplicationDelegate {
         onStateChange()
     }
 
-    /// Re-lays the current sources out as a preset; real sources come first.
+    /// Re-lays the current sources out as a preset; Dual and Triple fill empty slots with virtual screens.
     private func apply(_ preset: Preset) {
-        let sources = scene.panels.map(\.source).filter { $0.key != nil }
+        let sources = presetSources(preset, current: scene.panels.map(\.source))
         scene.replaceAll(preset.panels(sources: sources, distance: distance))
+        syncVirtualScreens()
         Task { await refreshSources() }
+    }
+
+    /// Adds a new virtual screen where you're looking.
+    private func newVirtualScreen() {
+        guard let serial = nextVirtualSerial(in: scene.panels) else {
+            NSSound.beep()  // all virtual screens are in use
+            return
+        }
+        let g = gaze
+        let id = scene.add(Panel(source: .virtualScreen(serial: serial), yaw: g.yaw, pitch: g.pitch,
+                                 distance: distance, width: 1.6 * distance / 2, aspect: 16.0 / 9))
+        scene.move(id, toYaw: g.yaw, pitch: g.pitch)
+        scene.selectedID = id
+        syncVirtualScreens()
+    }
+
+    /// Creates and removes macOS displays to match the virtual screen panels.
+    private func syncVirtualScreens() {
+        let serials = Set(scene.panels.compactMap { if case .virtualScreen(let s) = $0.source { s } else { nil } })
+        guard virtualDisplays.sync(serials: serials) else { return }
+        capture.virtualDisplayIDs = virtualDisplays.ids
+        arrangeDisplays(for: scene.panels, virtualIDs: virtualDisplays.ids)
+        // A new display takes a moment to reach ScreenCaptureKit.
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            await self.refreshSources()
+        }
     }
 
     private func addSource() {
@@ -291,6 +323,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         if screen == nil || gw.screen != screen {
             NSLog("LumaSpace: VITURE display gone or mirrored; back to the preview")
             moveOutputToPreview()
+        } else if let screen, gw.frame != screen.frame {
+            gw.setFrame(screen.frame, display: true)  // displays were rearranged
         }
     }
 
@@ -363,6 +397,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func saveIfDirty() {
         guard dirty else { return }
         dirty = false
+        if grab.panelID == nil { arrangeDisplays(for: scene.panels, virtualIDs: virtualDisplays.ids) }
         let f = LayoutFile(panels: scene.panels, distance: distance, smoothFollow: tracker.smoothFollow,
                            lockedAxes: Axis.allCases.filter { tracker.lockedAxes.contains($0) })
         do { try store.save(f) } catch { NSLog("LumaSpace: could not save layout: \(error)") }

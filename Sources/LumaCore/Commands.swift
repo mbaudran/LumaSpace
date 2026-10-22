@@ -12,6 +12,7 @@ public enum Command: Hashable, Sendable {
     case toggleAxisLock(Axis)
     case toggleSnap
     case addSource
+    case newVirtualScreen
     case removeSelected
     case groupAll
     case ungroupSelected
@@ -29,6 +30,7 @@ public enum Command: Hashable, Sendable {
         case .toggleAxisLock(let a): "Lock \(a.rawValue.capitalized)"
         case .toggleSnap: "Snapping"
         case .addSource: "Add Window or Display…"
+        case .newVirtualScreen: "New Virtual Screen"
         case .removeSelected: "Remove Selected Screen"
         case .groupAll: "Group All Screens"
         case .ungroupSelected: "Ungroup Selected"
@@ -48,6 +50,7 @@ public enum Command: Hashable, Sendable {
         case .toggleAxisLock: ["axis"]
         case .toggleSnap: ["grid", "magnet"]
         case .addSource: ["window", "display", "screen", "new"]
+        case .newVirtualScreen: ["monitor", "display", "extend", "add"]
         case .removeSelected: ["delete", "close"]
         case .groupAll, .ungroupSelected: ["group"]
         case .quit: ["exit"]
@@ -63,7 +66,7 @@ public enum Command: Hashable, Sendable {
             + DisplayRate.allCases.map { .setRate($0) }
             + [.toggleSmoothFollow]
             + Axis.allCases.map { .toggleAxisLock($0) }
-            + [.toggleSnap, .addSource, .removeSelected, .groupAll, .ungroupSelected, .quit]
+            + [.toggleSnap, .addSource, .newVirtualScreen, .removeSelected, .groupAll, .ungroupSelected, .quit]
     }
 }
 

@@ -48,6 +48,7 @@ Everything lives under the 👓 icon in the menu bar, and in the **command palet
 | ⌃⌥= / ⌃⌥- | Screens closer / farther |
 | ⌃⌥] / ⌃⌥[ | Selected screen bigger / smaller |
 | ⌃⌥A | Add a window or display |
+| ⌃⌥N | New virtual screen |
 | ⌃⌥F | Smooth Follow on/off |
 | ⌃⌥B / ⌃⌥⇧B | Brightness up / down |
 
@@ -63,6 +64,24 @@ If another app already owns one of these, the menu shows "Shortcut … unavailab
   "Ungroup Selected" to move one on its own, "Group All Screens" to join them again.
 - **⌃⌥A** opens a searchable list of windows and displays; the new screen appears where
   you're looking.
+
+### Virtual screens (extra monitors)
+
+A panel can show the Mac's screen, one app window, or a **virtual screen** — an extra
+monitor that LumaSpace creates. macOS treats it like a plugged-in display: drag windows
+onto it and move the mouse across.
+
+- **⌃⌥N** (or "New Virtual Screen") adds one where you're looking; up to 4.
+- **Dual** and **Triple** fill their empty slots with virtual screens — Triple puts the Mac
+  screen in the middle with a virtual screen on each side.
+- The screens are arranged in macOS the way their panels sit, so moving the mouse off the
+  right edge of one screen lands on the panel to its right. This follows you when you move
+  panels around.
+- Removing a panel (⌫) removes its virtual screen. Virtual screens only exist while
+  LumaSpace runs: when it quits, macOS moves their windows back to the Mac screen, and the
+  next launch recreates them.
+- This uses a macOS feature Apple doesn't document (the same one BetterDisplay and DeskPad
+  use), so a future macOS update could break it.
 
 ### In the simulator preview
 
@@ -102,6 +121,7 @@ These haven't been verified on real glasses yet — please report back:
 - [ ] Refresh Rate 60 / 90 / 120 Hz switches the glasses' mode
 - [ ] ⌃⌥ grab-and-move feels right (speed is 0.1° per point of mouse travel)
 - [ ] Unplugging falls back to the simulator; replugging reconnects
+- [ ] Triple (⌃⌥3): the mouse moves from the Mac screen into the virtual screens on both sides
 
 ## Development
 

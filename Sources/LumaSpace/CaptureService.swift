@@ -51,6 +51,8 @@ final class CaptureService {
     /// Called on the main actor when a running stream dies (window closed, display unplugged).
     var onSourceLost: (SourceKey) -> Void = { _ in }
     var glassesDisplayID: UInt32?
+    /// Live virtual screens (serial → display id). They show up as panels of their own, not as offered displays.
+    var virtualDisplayIDs: [UInt32: CGDirectDisplayID] = [:]
     /// Sources whose stream failed to start are retried at most every 10 s.
     private let retry = RetryGate<SourceKey>(delay: 10)
 
@@ -67,7 +69,8 @@ final class CaptureService {
             return ([], [])
         }
         content = c
-        let displays = c.displays.map { d in
+        let virtual = Set(virtualDisplayIDs.values)
+        let displays = c.displays.filter { !virtual.contains($0.displayID) }.map { d in
             DisplayInfo(id: d.displayID, name: Self.displayName(d.displayID))
         }
         let windows = c.windows.map { w in
@@ -78,6 +81,8 @@ final class CaptureService {
                                      ownPID: ProcessInfo.processInfo.processIdentifier)
         var existing = Set(c.displays.filter { $0.displayID != glassesDisplayID }.map { SourceKey.display($0.displayID) })
         existing.formUnion(c.windows.map { SourceKey.window($0.windowID) })
+        let shared = Set(c.displays.map(\.displayID))
+        existing.formUnion(virtualDisplayIDs.filter { shared.contains($0.value) }.keys.map { SourceKey.virtualScreen($0) })
         return (offered, existing)
     }
 
@@ -92,11 +97,20 @@ final class CaptureService {
     /// Width / height of a source, from the last shareable-content refresh.
     func aspect(of key: SourceKey) -> Double? {
         let size: CGSize? = switch key {
-        case .display(let id): content?.displays.first { $0.displayID == id }.map { CGSize(width: $0.width, height: $0.height) }
+        case .display, .virtualScreen:
+            content?.displays.first { $0.displayID == displayID(for: key) }.map { CGSize(width: $0.width, height: $0.height) }
         case .window(let id): content?.windows.first { $0.windowID == id }?.frame.size
         }
         guard let size, size.height > 0 else { return nil }
         return Double(size.width / size.height)
+    }
+
+    private func displayID(for key: SourceKey) -> CGDirectDisplayID? {
+        switch key {
+        case .display(let id): id
+        case .virtualScreen(let serial): virtualDisplayIDs[serial]
+        case .window: nil
+        }
     }
 
     /// Starts a stream for every available panel source and stops streams nothing uses.
@@ -115,8 +129,8 @@ final class CaptureService {
             let filter: SCContentFilter
             let size: CGSize
             switch key {
-            case .display(let id):
-                guard let d = content.displays.first(where: { $0.displayID == id }) else { continue }
+            case .display, .virtualScreen:
+                guard let d = content.displays.first(where: { $0.displayID == displayID(for: key) }) else { continue }
                 filter = SCContentFilter(display: d, excludingApplications: me, exceptingWindows: [])
                 size = CGSize(width: d.width, height: d.height)
             case .window(let id):

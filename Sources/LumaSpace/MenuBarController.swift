@@ -57,6 +57,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         for p in Preset.allCases { layout.addItem(command(.applyPreset(p), title: p.title)) }
         menu.addItem(submenu("Layout", layout))
         menu.addItem(command(.addSource))
+        menu.addItem(command(.newVirtualScreen))
         menu.addItem(command(.recenter))
         menu.addItem(.separator())
 

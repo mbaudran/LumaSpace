@@ -1,17 +1,20 @@
 import Foundation
 
 /// Identity of a capture source; window titles change, ids don't.
-public enum SourceKey: Hashable, Sendable { case display(UInt32), window(UInt32) }
+public enum SourceKey: Hashable, Sendable { case display(UInt32), window(UInt32), virtualScreen(UInt32) }
 
 public enum PanelSource: Codable, Hashable, Sendable {
     case display(id: UInt32, name: String)
     case window(id: UInt32, app: String, title: String)
+    /// A display LumaSpace creates itself. `serial` is stable across launches; the display id isn't.
+    case virtualScreen(serial: UInt32)
     case placeholder(String)
 
     public var key: SourceKey? {
         switch self {
         case .display(let id, _): .display(id)
         case .window(let id, _, _): .window(id)
+        case .virtualScreen(let serial): .virtualScreen(serial)
         case .placeholder: nil
         }
     }
@@ -20,6 +23,7 @@ public enum PanelSource: Codable, Hashable, Sendable {
         switch self {
         case .display(_, let name): name
         case .window(_, let app, let title): title.isEmpty ? app : "\(app) — \(title)"
+        case .virtualScreen(let serial): "Virtual Screen \(serial)"
         case .placeholder(let name): name
         }
     }
