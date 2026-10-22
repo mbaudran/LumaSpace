@@ -1,13 +1,25 @@
 import AppKit
 
-// `LumaSpace --probe-sdk` loads the VITURE SDK, lists glasses and exits (no UI).
-if CommandLine.arguments.contains("--probe-sdk") {
-    if let lib = VitureLibrary.load() {
-        let pids = findVitureDevicePIDs(isValid: { lib.isProductIDValid($0) })
-        print("sdk: loaded, devices: \(pids.count)\(pids.isEmpty ? "" : " " + pids.map { String(format: "0x%04X", $0) }.joined(separator: ","))")
-    } else {
-        print("sdk: missing")
+// `LumaSpace --diagnose` (alias `--probe-sdk`) reports the SDK, USB devices and displays, then exits (no UI).
+if CommandLine.arguments.contains("--diagnose") || CommandLine.arguments.contains("--probe-sdk") {
+    let lib = VitureLibrary.load()
+    print("sdk: \(lib == nil ? "missing" : "loaded")")
+    for line in VitureLibrary.loadReport { print("  \(line)") }
+    let usb = findVitureUSBDevices()
+    print("usb: \(usb.count) VITURE device(s)")
+    for d in usb {
+        let accepted = lib.map { $0.isProductIDValid(Int32(d.pid)) ? "accepted by SDK (\($0.name(of: d.pid)))" : "REJECTED by SDK" }
+        print("  " + String(format: "0x%04X", d.pid) + " \(d.name) — \(accepted ?? "SDK not loaded")")
     }
+    print("displays:")
+    for s in NSScreen.screens {
+        let id = OutputWindow.displayID(of: s) ?? 0
+        print("  \(s.localizedName) \(Int(s.frame.width))x\(Int(s.frame.height))\(CGDisplayIsInMirrorSet(id) != 0 ? " (mirrored)" : "")")
+    }
+    print("glasses display: \(OutputWindow.usableGlassesScreen()?.localizedName ?? "none usable")")
+    let others = NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
+        .filter { $0.range(of: "spacewalker", options: .caseInsensitive) != nil }
+    print("spacewalker running: \(others.isEmpty ? "no" : "YES — quit it")")
     exit(0)
 }
 

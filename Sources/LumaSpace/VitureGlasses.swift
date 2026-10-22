@@ -49,20 +49,35 @@ final class VitureLibrary: @unchecked Sendable {
             candidates.append((fw as NSString).appendingPathComponent("libglasses.dylib"))
         }
         candidates.append(FileManager.default.currentDirectoryPath + "/vendor/viture-sdk/aarch64/libglasses.dylib")
-        for path in candidates where FileManager.default.fileExists(atPath: path) {
+        loadReport = []
+        for path in candidates {
+            guard FileManager.default.fileExists(atPath: path) else {
+                loadReport.append("\(path): not found")
+                continue
+            }
             // macOS kills the process when it loads a quarantined (browser-downloaded) dylib; skip it instead.
             if getxattr(path, "com.apple.quarantine", nil, 0, 0, 0) >= 0 {
                 NSLog("LumaSpace: \(path) is quarantined; skipping (run scripts/bundle.sh, which bundles a cleared copy)")
+                loadReport.append("\(path): quarantined, skipped")
                 continue
             }
             guard let h = dlopen(path, RTLD_NOW | RTLD_LOCAL) else {
-                NSLog("LumaSpace: dlopen \(path) failed: \(String(cString: dlerror()))")
+                let err = String(cString: dlerror())
+                NSLog("LumaSpace: dlopen \(path) failed: \(err)")
+                loadReport.append("\(path): dlopen failed: \(err)")
                 continue
             }
-            if let lib = VitureLibrary(h) { return lib }
+            if let lib = VitureLibrary(h) {
+                loadReport.append("\(path): loaded")
+                return lib
+            }
+            loadReport.append("\(path): missing SDK symbols")
         }
         return nil
     }
+
+    /// What `load()` found at each candidate path, for `--diagnose`.
+    nonisolated(unsafe) static var loadReport: [String] = []
 
     private init?(_ h: UnsafeMutableRawPointer) {
         func sym<T>(_ name: String, _: T.Type = T.self) -> T? {
@@ -116,21 +131,31 @@ final class VitureLibrary: @unchecked Sendable {
 
 /// VITURE USB devices currently attached (VID 0x35CA), deduplicated, in discovery order.
 func findVitureDevicePIDs(isValid: (Int32) -> Bool) -> [Int] {
-    var pids: [Int] = []
-    guard let match = IOServiceMatching(kIOUSBDeviceClassName) else { return [] }
-    var it: io_iterator_t = 0
-    guard IOServiceGetMatchingServices(kIOMainPortDefault, match, &it) == KERN_SUCCESS else { return [] }
-    defer { IOObjectRelease(it) }
+    findVitureUSBDevices().map(\.pid).filter { isValid(Int32($0)) }
+}
+
+/// Every USB device with VITURE's vendor id (0x35CA), whether or not the SDK accepts its product id.
+func findVitureUSBDevices() -> [(pid: Int, name: String)] {
+    var found: [(pid: Int, name: String)] = []
     func number(_ s: io_service_t, _ key: String) -> Int? {
         (IORegistryEntryCreateCFProperty(s, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.intValue
     }
-    while case let s = IOIteratorNext(it), s != 0 {
-        defer { IOObjectRelease(s) }
-        guard number(s, "idVendor") == 0x35CA, let pid = number(s, "idProduct"), isValid(Int32(pid)),
-              !pids.contains(pid) else { continue }
-        pids.append(pid)
+    // Apple silicon registers USB devices as IOUSBHostDevice; older macOS also answers to IOUSBDevice.
+    for cls in ["IOUSBHostDevice", kIOUSBDeviceClassName] {
+        guard let match = IOServiceMatching(cls) else { continue }
+        var it: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, match, &it) == KERN_SUCCESS else { continue }
+        defer { IOObjectRelease(it) }
+        while case let s = IOIteratorNext(it), s != 0 {
+            defer { IOObjectRelease(s) }
+            guard number(s, "idVendor") == 0x35CA, let pid = number(s, "idProduct"),
+                  !found.contains(where: { $0.pid == pid }) else { continue }
+            let name = IORegistryEntryCreateCFProperty(s, "USB Product Name" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? String
+            found.append((pid, name ?? "?"))
+        }
     }
-    return pids
+    return found
 }
 
 /// Pose and button state written by SDK threads, read by the renderer.

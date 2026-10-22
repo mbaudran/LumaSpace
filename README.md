@@ -9,13 +9,19 @@ your head; they don't move when you lean).
 
 ## Install
 
-1. Download **VITURE XR Glasses SDK for macOS** from <https://www.viture.com/developer>
-   and unzip it into `vendor/viture-sdk/` so that `vendor/viture-sdk/aarch64/libglasses.dylib`
-   exists. (The SDK isn't redistributed in this repo.)
+1. Download **VITURE XR Glasses SDK for macOS** from <https://www.viture.com/developer>.
+   Leave the zip in `~/Downloads` (or this folder) — the build script finds and unpacks it.
+   (The SDK isn't redistributed in this repo.)
 2. Build and install — only Apple's Command Line Tools are needed, not Xcode:
    ```sh
    scripts/bundle.sh --install
    ```
+   It stops with an error if it can't find the SDK. Then check it's all in place:
+   ```sh
+   /Applications/LumaSpace.app/Contents/MacOS/LumaSpace --diagnose
+   ```
+   With the glasses plugged in you want `sdk: loaded`, one USB device "accepted by SDK",
+   and a `glasses display`.
 3. **Quit SpaceWalker.** Only one app can read the glasses' head tracking at a time.
 4. Open `/Applications/LumaSpace.app`. The first time, macOS asks for **Screen Recording**
    permission (System Settings → Privacy & Security → Screen Recording). Allow it and reopen.
@@ -69,11 +75,13 @@ LumaSpace starts with a single screen and keeps the old file as `layout.json.bad
 
 ## Troubleshooting
 
-- **Menu says "Simulator — VITURE SDK not found"**: the SDK wasn't bundled. Check that
-  `vendor/viture-sdk/aarch64/libglasses.dylib` exists and rerun `scripts/bundle.sh --install`.
+First run `/Applications/LumaSpace.app/Contents/MacOS/LumaSpace --diagnose` — it shows which
+step fails.
+
+- **Menu says "Simulator — VITURE SDK not found"**: the SDK wasn't bundled. Put the SDK zip
+  in `~/Downloads` and rerun `scripts/bundle.sh --install`.
 - **"Simulator — Glasses not connected"** with the glasses plugged in: quit SpaceWalker,
-  replug the cable, and check `LumaSpace.app/Contents/MacOS/LumaSpace --probe-sdk` prints
-  `devices: 1`.
+  replug the cable, and check `--diagnose` lists the device as "accepted by SDK".
 - **Glasses connected but still in the preview**: the glasses must be an extended display
   (System Settings → Displays). LumaSpace looks for a display whose name contains "VITURE".
 - **Screens show only their name, not their content**: Screen Recording permission is missing — allow it and reopen. Each
