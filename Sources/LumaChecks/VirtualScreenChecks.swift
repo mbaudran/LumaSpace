@@ -80,6 +80,10 @@ func virtualScreenChecks() {
         expectEqual(o[4], DisplayOrigin(x: 1710, y: 13))
         expectEqual(o.count, 2)
     }
+    check("arranging displays is a command you run, findable as 'arrange'") {
+        expect(Command.all.contains(.arrangeDisplays))
+        expectEqual(paletteMatches("arrange", in: Command.all).first, .arrangeDisplays)
+    }
     check("new virtual screen command is findable") {
         expect(Command.all.contains(.newVirtualScreen))
         expectEqual(paletteMatches("virt", in: Command.all).first, .newVirtualScreen)

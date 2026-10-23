@@ -209,6 +209,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .toggleSnap: scene.snap.enabled.toggle()
         case .addSource: addSource()
         case .newVirtualScreen: newVirtualScreen()
+        case .arrangeDisplays: arrangeDisplays(for: scene.panels, virtualIDs: virtualDisplays.ids)
         case .removeSelected:
             if let id = scene.selectedID { scene.remove(id); capture.sync(panels: scene.panels); syncVirtualScreens() }
         case .groupAll: scene.group(scene.panels.map(\.id))
@@ -241,7 +242,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         syncVirtualScreens()
     }
 
-    /// Creates and removes macOS displays to match the virtual screen panels.
+    /// Creates and removes macOS displays to match the virtual screen panels. The arrangement is only
+    /// redone when screens come or go; moving panels leaves macOS alone ("Arrange Screens Like Panels" does it on demand).
     private func syncVirtualScreens() {
         let serials = Set(scene.panels.compactMap { if case .virtualScreen(let s) = $0.source { s } else { nil } })
         guard virtualDisplays.sync(serials: serials) else { return }
@@ -397,7 +399,6 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func saveIfDirty() {
         guard dirty else { return }
         dirty = false
-        if grab.panelID == nil { arrangeDisplays(for: scene.panels, virtualIDs: virtualDisplays.ids) }
         let f = LayoutFile(panels: scene.panels, distance: distance, smoothFollow: tracker.smoothFollow,
                            lockedAxes: Axis.allCases.filter { tracker.lockedAxes.contains($0) })
         do { try store.save(f) } catch { NSLog("LumaSpace: could not save layout: \(error)") }

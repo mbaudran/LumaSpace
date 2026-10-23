@@ -74,9 +74,11 @@ onto it and move the mouse across.
 - **⌃⌥N** (or "New Virtual Screen") adds one where you're looking; up to 4.
 - **Dual** and **Triple** fill their empty slots with virtual screens — Triple puts the Mac
   screen in the middle with a virtual screen on each side.
-- The screens are arranged in macOS the way their panels sit, so moving the mouse off the
-  right edge of one screen lands on the panel to its right. This follows you when you move
-  panels around.
+- When virtual screens are added or removed, macOS arranges the screens the way their
+  panels sit, so moving the mouse off the right edge of one screen lands on the panel to its
+  right. Moving panels afterwards doesn't rearrange anything; run **"Arrange Screens Like
+  Panels"** (menu or palette) when you want the mouse to follow the new layout, or arrange
+  them yourself in System Settings → Displays.
 - Removing a panel (⌫) removes its virtual screen. Virtual screens only exist while
   LumaSpace runs: when it quits, macOS moves their windows back to the Mac screen, and the
   next launch recreates them.

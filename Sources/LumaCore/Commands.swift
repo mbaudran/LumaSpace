@@ -13,6 +13,7 @@ public enum Command: Hashable, Sendable {
     case toggleSnap
     case addSource
     case newVirtualScreen
+    case arrangeDisplays
     case removeSelected
     case groupAll
     case ungroupSelected
@@ -31,6 +32,7 @@ public enum Command: Hashable, Sendable {
         case .toggleSnap: "Snapping"
         case .addSource: "Add Window or Display…"
         case .newVirtualScreen: "New Virtual Screen"
+        case .arrangeDisplays: "Arrange Screens Like Panels"
         case .removeSelected: "Remove Selected Screen"
         case .groupAll: "Group All Screens"
         case .ungroupSelected: "Ungroup Selected"
@@ -51,6 +53,7 @@ public enum Command: Hashable, Sendable {
         case .toggleSnap: ["grid", "magnet"]
         case .addSource: ["window", "display", "screen", "new"]
         case .newVirtualScreen: ["monitor", "display", "extend", "add"]
+        case .arrangeDisplays: ["align", "mouse", "order", "displays"]
         case .removeSelected: ["delete", "close"]
         case .groupAll, .ungroupSelected: ["group"]
         case .quit: ["exit"]
@@ -66,7 +69,7 @@ public enum Command: Hashable, Sendable {
             + DisplayRate.allCases.map { .setRate($0) }
             + [.toggleSmoothFollow]
             + Axis.allCases.map { .toggleAxisLock($0) }
-            + [.toggleSnap, .addSource, .newVirtualScreen, .removeSelected, .groupAll, .ungroupSelected, .quit]
+            + [.toggleSnap, .addSource, .newVirtualScreen, .arrangeDisplays, .removeSelected, .groupAll, .ungroupSelected, .quit]
     }
 }
 
