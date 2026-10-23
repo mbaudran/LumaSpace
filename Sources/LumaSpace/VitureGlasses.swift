@@ -39,7 +39,12 @@ final class VitureLibrary: @unchecked Sendable {
     fileprivate let setDisplayMode: @convention(c) (Handle, Int32) -> Int32
     fileprivate let setLogLevel: @convention(c) (Int32) -> Void
 
-    /// Lookup order: $LUMA_SDK_PATH (file or folder), the app bundle's Frameworks, ./vendor/viture-sdk/aarch64.
+    /// Where "Set Up VITURE SDK…" installs the libraries.
+    static let installDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("LumaSpace/viture-sdk", isDirectory: true)
+
+    /// Lookup order: $LUMA_SDK_PATH (file or folder), the app bundle's Frameworks, the installed SDK,
+    /// ./vendor/viture-sdk/aarch64.
     static func load() -> VitureLibrary? {
         var candidates: [String] = []
         if let env = ProcessInfo.processInfo.environment["LUMA_SDK_PATH"] {
@@ -48,6 +53,7 @@ final class VitureLibrary: @unchecked Sendable {
         if let fw = Bundle.main.privateFrameworksPath {
             candidates.append((fw as NSString).appendingPathComponent("libglasses.dylib"))
         }
+        candidates.append(installDir.appendingPathComponent("libglasses.dylib").path)
         candidates.append(FileManager.default.currentDirectoryPath + "/vendor/viture-sdk/aarch64/libglasses.dylib")
         loadReport = []
         for path in candidates {

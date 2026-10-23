@@ -1,5 +1,18 @@
 import AppKit
 
+// `LumaSpace --install-sdk <zip|folder|dylib>` installs the VITURE SDK, like "Set Up VITURE SDK…".
+if let i = CommandLine.arguments.firstIndex(of: "--install-sdk") {
+    guard i + 1 < CommandLine.arguments.count else { print("usage: LumaSpace --install-sdk <VITURE SDK zip>"); exit(2) }
+    do {
+        try SDKInstaller.install(from: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+        print("installed the VITURE SDK into \(VitureLibrary.installDir.path)")
+        exit(0)
+    } catch {
+        print("error: \(error.localizedDescription)")
+        exit(1)
+    }
+}
+
 // `LumaSpace --diagnose` (alias `--probe-sdk`) reports the SDK, USB devices and displays, then exits (no UI).
 if CommandLine.arguments.contains("--diagnose") || CommandLine.arguments.contains("--probe-sdk") {
     let lib = VitureLibrary.load()

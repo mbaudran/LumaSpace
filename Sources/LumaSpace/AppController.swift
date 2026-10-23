@@ -23,7 +23,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     let palette = PaletteWindow()
     var hotkeys: Hotkeys?
     private var menuBar: MenuBarController?
-    private let sdk = VitureLibrary.load()
+    private var sdk = VitureLibrary.load()
+    var sdkLoaded: Bool { sdk != nil }
     private let virtualDisplays = VirtualDisplays()
     private var glassesWindow: NSWindow?
     private var missedPolls = 0
@@ -136,6 +137,31 @@ final class AppController: NSObject, NSApplicationDelegate {
     func showPreview() {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Asks for the downloaded VITURE SDK and installs it, then connects if the glasses are plugged in.
+    func setUpSDK() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose the VITURE SDK"
+        panel.message = "Pick the \"VITURE XR Glasses SDK for macOS\" zip you downloaded from viture.com/developer."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try SDKInstaller.install(from: url)
+            sdk = VitureLibrary.load()
+            if sdk == nil { throw SDKInstaller.Failure.noLibrary }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't set up the VITURE SDK"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return
+        }
+        useSimulator(reason: "Glasses not connected")  // the poll below connects if they're plugged in
+        pollGlasses()
     }
 
     func showPalette() { palette.show(over: glassesWindow ?? window) }

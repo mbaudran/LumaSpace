@@ -39,7 +39,7 @@ It's a small menu-bar app built on VITURE's official SDK, and it works without S
 |---|---|
 | Glasses | VITURE **Luma** |
 | Mac | Apple silicon (M1 or later), macOS 14 Sonoma or later |
-| Tools | Apple Command Line Tools with Swift 6.0+ (Xcode is *not* needed) |
+| Tools | None for the download. To build from source: Command Line Tools with Swift 6.0+ (no Xcode) |
 | SDK | [VITURE XR Glasses SDK for macOS](https://www.viture.com/developer) (free download) |
 
 Luma tracks rotation only (3DoF): screens stay put when you turn your head, but not when
@@ -47,39 +47,47 @@ you lean or walk.
 
 ## Install
 
-**1. Get the code**
+### Option A: download the app (easiest)
+
+1. Download **LumaSpace-x.y.z.zip** from the
+   [latest release](https://github.com/mbaudran/LumaSpace/releases/latest), unzip it and drag
+   **LumaSpace.app** into **Applications**.
+2. **Open it the first time.** The app isn't notarized by Apple yet, so macOS blocks it at
+   first. Try to open it, then go to System Settings → Privacy & Security, scroll down and
+   click **Open Anyway**. If you'd rather use Terminal:
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/LumaSpace.app
+   ```
+3. **Add the VITURE SDK.** Download *VITURE XR Glasses SDK for macOS* from
+   [viture.com/developer](https://www.viture.com/developer). It's free, and it's VITURE's to
+   distribute, so it isn't bundled with LumaSpace. Then click the 👓 icon in the menu bar,
+   choose **Set Up VITURE SDK…** and pick the zip you just downloaded. You only do this once.
+4. Continue with [First launch](#first-launch).
+
+### Option B: build from source
+
+You need Apple's Command Line Tools with Swift 6.0+ (`xcode-select --install`). Xcode isn't
+needed.
 
 ```sh
 git clone https://github.com/mbaudran/LumaSpace.git
 cd LumaSpace
-```
-
-Or download the ZIP from GitHub and unzip it.
-
-**2. Get the VITURE SDK.** Download *VITURE XR Glasses SDK for macOS* from
-[viture.com/developer](https://www.viture.com/developer). Leave the zip in `~/Downloads`
-or in the LumaSpace folder; the build script finds it. The SDK is VITURE's, so it isn't
-included in this repo.
-
-**3. Build and install**
-
-```sh
 scripts/bundle.sh --install
 ```
 
-No Command Line Tools yet? Run `xcode-select --install` first.
+Download the VITURE SDK zip first (see above) and leave it in `~/Downloads` or in the
+LumaSpace folder. The build script finds it and builds it into the app.
 
-**4. Quit SpaceWalker.** Only one app can read the glasses' head tracking at a time.
+**Updating:** `git pull`, then run `scripts/bundle.sh --install` again.
 
-**5. Open LumaSpace** from `/Applications`. The first time, macOS asks for **Screen
-Recording** permission (System Settings → Privacy & Security → Screen Recording). LumaSpace
-needs it to show your screens in the glasses. Allow it, then reopen the app.
+### First launch
 
-**6. Plug in the glasses.** LumaSpace finds them within a couple of seconds, goes fullscreen
-on the glasses and centres the layout in front of you.
-
-**Updating:** `git pull` (or download the ZIP again), then run `scripts/bundle.sh --install`
-again.
+1. **Quit SpaceWalker.** Only one app can read the glasses' head tracking at a time.
+2. **Open LumaSpace.** macOS asks for **Screen Recording** permission (System Settings →
+   Privacy & Security → Screen Recording). LumaSpace needs it to show your screens in the
+   glasses. Allow it, then reopen the app.
+3. **Plug in the glasses.** LumaSpace finds them within a couple of seconds, goes fullscreen
+   on the glasses and centres the layout in front of you.
 
 ## Getting around
 
@@ -164,7 +172,7 @@ and a `glasses display`.
 
 | Symptom | Fix |
 |---|---|
-| Menu says **"VITURE SDK not found"** | Put the SDK zip in `~/Downloads` and run `scripts/bundle.sh --install` again. |
+| Menu says **"VITURE SDK not found"** | Choose **Set Up VITURE SDK…** in the menu and pick the SDK zip, or run `LumaSpace --install-sdk ~/Downloads/<sdk>.zip`. From source, run `scripts/bundle.sh --install` again. |
 | **"Glasses not connected"** while plugged in | Quit SpaceWalker and replug the cable. `--diagnose` should list the glasses as "accepted by SDK". |
 | **"Glasses found but couldn't be opened"** | Another app (usually SpaceWalker) is using them. Quit it; LumaSpace retries by itself. |
 | Glasses work but LumaSpace stays in the preview | The glasses must be an extended display, not a mirror (System Settings → Displays). |
@@ -193,8 +201,8 @@ tracking isn't supported yet. Tried something? Open an issue and say how it went
   is recorded, saved or sent anywhere.
 - **Virtual screens use an undocumented macOS feature.** It's the same one apps like
   BetterDisplay and DeskPad use. It works today, but a future macOS update could change it.
-- **Ad-hoc signed.** The app is built and signed on your own Mac, so there's no notarized
-  download yet.
+- **Not notarized yet.** Releases are ad-hoc signed, so macOS asks you to allow the app
+  once (see [Install](#install)).
 
 ## How it works
 
@@ -220,6 +228,7 @@ Sources/
 ```sh
 scripts/checks.sh      # run the test suite (no XCTest or Xcode needed)
 scripts/bundle.sh      # build build/LumaSpace.app (add --install to copy it to /Applications)
+scripts/release.sh     # build build/LumaSpace-<version>.zip for a GitHub release (never includes the SDK)
 ```
 
 Debug environment variables:

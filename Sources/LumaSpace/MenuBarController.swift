@@ -50,6 +50,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let status = NSMenuItem(title: app.glasses.status.text, action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
+        if !app.sdkLoaded { menu.addItem(action("Set Up VITURE SDK…", #selector(setUpSDK))) }
         menu.addItem(action("Show Preview", #selector(showPreview)))
         menu.addItem(.separator())
 
@@ -128,6 +129,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func showPreview() { app.showPreview() }
+    @objc private func setUpSDK() { app.setUpSDK() }
     @objc private func showPalette() { app.showPalette() }
 }
 
