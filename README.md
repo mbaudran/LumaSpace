@@ -49,6 +49,7 @@ Everything lives under the 👓 icon in the menu bar, and in the **command palet
 | ⌃⌥] / ⌃⌥[ | Selected screen bigger / smaller |
 | ⌃⌥A | Add a window or display |
 | ⌃⌥N | New virtual screen |
+| ⌃⌥G | Game mode on/off |
 | ⌃⌥F | Smooth Follow on/off |
 | ⌃⌥B / ⌃⌥⇧B | Brightness up / down |
 
@@ -84,6 +85,18 @@ onto it and move the mouse across.
   next launch recreates them.
 - This uses a macOS feature Apple doesn't document (the same one BetterDisplay and DeskPad
   use), so a future macOS update could break it.
+
+### Game mode
+
+**⌃⌥G** (or "Game Mode" in the menu) turns the glasses into a plain 120 Hz monitor for
+gaming: LumaSpace stops drawing on them, so the picture stays fixed in the glasses instead
+of in space, with no extra delay. The glasses become the main display while it's on, so
+fullscreen apps open there and only there, and Steam Big Picture opens if Steam is installed.
+The Mac's menu bar and Dock move to the glasses too (behind the game).
+
+Press **⌃⌥G** again to get your screens back; the main display and refresh rate go back to
+what they were (60 Hz unless you picked another rate in LumaSpace). Quitting LumaSpace or
+unplugging the glasses also ends game mode.
 
 ### In the simulator preview
 
@@ -124,6 +137,7 @@ These haven't been verified on real glasses yet — please report back:
 - [ ] ⌃⌥ grab-and-move feels right (speed is 0.1° per point of mouse travel)
 - [ ] Unplugging falls back to the simulator; replugging reconnects
 - [ ] Triple (⌃⌥3): the mouse moves from the Mac screen into the virtual screens on both sides
+- [ ] Game mode (⌃⌥G): glasses at 120 Hz, Big Picture opens on the glasses only; ⌃⌥G again brings the screens back
 
 ## Development
 

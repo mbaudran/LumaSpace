@@ -68,3 +68,10 @@ public func arrangeDisplays(placed: [PlacedDisplay], others: [DisplaySize], main
     let shift = rects[main].map { ($0.x, $0.y) } ?? (0, 0)
     return rects.mapValues { DisplayOrigin(x: Int($0.x - shift.0), y: Int($0.y - shift.1)) }
 }
+
+/// The same arrangement shifted so `id` sits at the origin, which makes it the main display.
+/// Nil when `id` isn't one of the displays.
+public func originsMakingMain(_ id: UInt32, current: [UInt32: DisplayOrigin]) -> [UInt32: DisplayOrigin]? {
+    guard let o = current[id] else { return nil }
+    return current.mapValues { DisplayOrigin(x: $0.x - o.x, y: $0.y - o.y) }
+}

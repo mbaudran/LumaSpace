@@ -55,12 +55,7 @@ final class VirtualDisplays {
 @MainActor
 func arrangeDisplays(for panels: [Panel], virtualIDs: [UInt32: CGDirectDisplayID]) {
     guard !virtualIDs.isEmpty else { return }
-    var count: UInt32 = 0
-    CGGetActiveDisplayList(0, nil, &count)
-    var active = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    CGGetActiveDisplayList(count, &active, &count)
-    // Mirrored displays follow their mirror source; leave them alone.
-    let ids = active.filter { CGDisplayMirrorsDisplay($0) == kCGNullDirectDisplay }
+    let ids = arrangeableDisplayIDs()
 
     var placed: [PlacedDisplay] = []
     for p in panels {
@@ -76,12 +71,29 @@ func arrangeDisplays(for panels: [Panel], virtualIDs: [UInt32: CGDirectDisplayID
     let others = ids.filter { id in !placed.contains { $0.id == id } }.map {
         DisplaySize(id: $0, width: CGDisplayBounds($0).width, height: CGDisplayBounds($0).height)
     }
-    let target = LumaCore.arrangeDisplays(placed: placed, others: others, main: CGMainDisplayID())
-    let differs = target.contains { id, o in
+    applyDisplayOrigins(LumaCore.arrangeDisplays(placed: placed, others: others, main: CGMainDisplayID()))
+}
+
+/// Active displays, minus mirrors (they follow their mirror source).
+func arrangeableDisplayIDs() -> [CGDirectDisplayID] {
+    var count: UInt32 = 0
+    CGGetActiveDisplayList(0, nil, &count)
+    var active = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    CGGetActiveDisplayList(count, &active, &count)
+    return active.filter { CGDisplayMirrorsDisplay($0) == kCGNullDirectDisplay }
+}
+
+func currentDisplayOrigins() -> [UInt32: DisplayOrigin] {
+    Dictionary(uniqueKeysWithValues: arrangeableDisplayIDs().map { id in
         let b = CGDisplayBounds(id)
-        return Int(b.origin.x) != o.x || Int(b.origin.y) != o.y
-    }
-    guard differs else { return }
+        return (id, DisplayOrigin(x: Int(b.origin.x), y: Int(b.origin.y)))
+    })
+}
+
+/// Moves displays for this login session; does nothing when they're already there.
+func applyDisplayOrigins(_ target: [UInt32: DisplayOrigin]) {
+    let current = currentDisplayOrigins()
+    guard target.contains(where: { current[$0.key] != $0.value }) else { return }
     var config: CGDisplayConfigRef?
     guard CGBeginDisplayConfiguration(&config) == .success, let config else { return }
     for (id, o) in target { CGConfigureDisplayOrigin(config, id, Int32(o.x), Int32(o.y)) }

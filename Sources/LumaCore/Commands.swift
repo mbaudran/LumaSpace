@@ -11,6 +11,7 @@ public enum Command: Hashable, Sendable {
     case toggleSmoothFollow
     case toggleAxisLock(Axis)
     case toggleSnap
+    case toggleGameMode
     case addSource
     case newVirtualScreen
     case arrangeDisplays
@@ -30,6 +31,7 @@ public enum Command: Hashable, Sendable {
         case .toggleSmoothFollow: "Smooth Follow"
         case .toggleAxisLock(let a): "Lock \(a.rawValue.capitalized)"
         case .toggleSnap: "Snapping"
+        case .toggleGameMode: "Game Mode"
         case .addSource: "Add Window or Display…"
         case .newVirtualScreen: "New Virtual Screen"
         case .arrangeDisplays: "Arrange Screens Like Panels"
@@ -51,6 +53,7 @@ public enum Command: Hashable, Sendable {
         case .toggleSmoothFollow: ["follow", "drift"]
         case .toggleAxisLock: ["axis"]
         case .toggleSnap: ["grid", "magnet"]
+        case .toggleGameMode: ["steam", "big picture", "play", "120"]
         case .addSource: ["window", "display", "screen", "new"]
         case .newVirtualScreen: ["monitor", "display", "extend", "add"]
         case .arrangeDisplays: ["align", "mouse", "order", "displays"]
@@ -69,7 +72,7 @@ public enum Command: Hashable, Sendable {
             + DisplayRate.allCases.map { .setRate($0) }
             + [.toggleSmoothFollow]
             + Axis.allCases.map { .toggleAxisLock($0) }
-            + [.toggleSnap, .addSource, .newVirtualScreen, .arrangeDisplays, .removeSelected, .groupAll, .ungroupSelected, .quit]
+            + [.toggleSnap, .toggleGameMode, .addSource, .newVirtualScreen, .arrangeDisplays, .removeSelected, .groupAll, .ungroupSelected, .quit]
     }
 }
 

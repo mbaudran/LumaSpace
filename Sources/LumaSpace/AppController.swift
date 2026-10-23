@@ -32,6 +32,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Glasses that couldn't be opened (e.g. SpaceWalker holds them) are retried every 15 s, not every poll.
     private let bringUp = RetryGate<Int>(delay: 15)
     private var recenterOnFirstSample = false
+    /// Game mode: LumaSpace steps aside so the glasses are a plain 120 Hz monitor showing Steam Big Picture.
+    private(set) var gameMode = false
+    private var mainBeforeGame: CGDirectDisplayID?
+    /// The refresh rate last chosen in LumaSpace; game mode restores it.
+    private var rate: DisplayRate?
     /// Called after any command so menus can refresh their checkmarks and sliders.
     var onStateChange: () -> Void = {}
 
@@ -142,6 +147,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ n: Notification) {
+        exitGameMode()
         dirty = true
         saveIfDirty()
     }
@@ -202,16 +208,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .resizeSelected(let f):
             if let id = scene.selectedID, let p = scene.panel(id) { scene.resize(id, width: p.width * f) }
         case .adjustLevel(let k, let d): glasses.setLevel(k, (glasses.level(k) ?? 0) + d)
-        case .setRate(let r): glasses.setRate(r)
+        case .setRate(let r): glasses.setRate(r); rate = r
         case .toggleSmoothFollow: tracker.smoothFollow.toggle()
         case .toggleAxisLock(let a):
             if tracker.lockedAxes.contains(a) { tracker.lockedAxes.remove(a) } else { tracker.lockedAxes.insert(a) }
         case .toggleSnap: scene.snap.enabled.toggle()
+        case .toggleGameMode: if gameMode { exitGameMode() } else { enterGameMode() }
         case .addSource: addSource()
         case .newVirtualScreen: newVirtualScreen()
         case .arrangeDisplays: arrangeDisplays(for: scene.panels, virtualIDs: virtualDisplays.ids)
         case .removeSelected:
-            if let id = scene.selectedID { scene.remove(id); capture.sync(panels: scene.panels); syncVirtualScreens() }
+            if let id = scene.selectedID { scene.remove(id); capture.sync(panels: capturedPanels); syncVirtualScreens() }
         case .groupAll: scene.group(scene.panels.map(\.id))
         case .ungroupSelected: if let id = scene.selectedID { scene.ungroup(id) }
         case .quit: NSApp.terminate(nil)
@@ -227,6 +234,54 @@ final class AppController: NSObject, NSApplicationDelegate {
         syncVirtualScreens()
         Task { await refreshSources() }
     }
+
+    /// Hides LumaSpace on the glasses, switches them to 120 Hz, makes them the main display (so
+    /// fullscreen apps open there and only there) and opens Steam Big Picture.
+    private func enterGameMode() {
+        guard glasses is VitureGlasses, let gw = glassesWindow else {
+            NSSound.beep()  // needs the glasses connected and showing LumaSpace
+            return
+        }
+        gameMode = true
+        mainBeforeGame = CGMainDisplayID()
+        gw.orderOut(nil)
+        view.isPaused = true
+        capture.sync(panels: capturedPanels)
+        glasses.setRate(.hz120)
+        // A refresh rate change can briefly reconnect the display; rearrange once it has settled.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.gameMode else { return }
+            if let id = OutputWindow.usableGlassesScreen().flatMap(OutputWindow.displayID(of:)),
+               let origins = originsMakingMain(id, current: currentDisplayOrigins()) {
+                applyDisplayOrigins(origins)
+            }
+            if let url = URL(string: "steam://open/bigpicture"), NSWorkspace.shared.urlForApplication(toOpen: url) != nil {
+                NSWorkspace.shared.open(url)
+            } else {
+                NSLog("LumaSpace: Steam isn't installed; game mode without Big Picture")
+            }
+        }
+    }
+
+    /// Puts back the main display, the refresh rate and LumaSpace's screens.
+    private func exitGameMode() {
+        guard gameMode else { return }
+        gameMode = false
+        if let main = mainBeforeGame, let origins = originsMakingMain(main, current: currentDisplayOrigins()) {
+            applyDisplayOrigins(origins)
+        }
+        mainBeforeGame = nil
+        glasses.setRate(rate ?? .hz60)
+        view.isPaused = false
+        if let gw = glassesWindow, let screen = OutputWindow.usableGlassesScreen() {
+            gw.setFrame(screen.frame, display: true)
+            gw.orderFrontRegardless()
+        }
+        Task { await refreshSources() }
+    }
+
+    /// Panels whose sources are captured; none in game mode.
+    private var capturedPanels: [Panel] { gameMode ? [] : scene.panels }
 
     /// Adds a new virtual screen where you're looking.
     private func newVirtualScreen() {
@@ -320,7 +375,8 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// Leaves the glasses output as soon as the VITURE display goes away or turns into a mirror.
     private func screensChanged() {
-        guard let gw = glassesWindow else { return }
+        // In game mode the window is hidden and the display may blink during the rate change.
+        guard !gameMode, let gw = glassesWindow else { return }
         let screen = OutputWindow.usableGlassesScreen()
         if screen == nil || gw.screen != screen {
             NSLog("LumaSpace: VITURE display gone or mirrored; back to the preview")
@@ -331,6 +387,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func useSimulator(reason: String) {
+        exitGameMode()
         glasses.stop()
         let sim = SimulatedGlasses(reason: reason)
         glasses = sim
@@ -383,7 +440,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             markDirty()
         }
         scene.updateAvailability(available: r.existing)
-        capture.sync(panels: scene.panels)
+        capture.sync(panels: capturedPanels)
     }
 
     func markDirty() { dirty = true }

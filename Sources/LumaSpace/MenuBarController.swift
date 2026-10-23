@@ -60,6 +60,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(command(.newVirtualScreen))
         menu.addItem(command(.arrangeDisplays))
         menu.addItem(command(.recenter))
+        menu.addItem(command(.toggleGameMode, checked: app.gameMode))
         menu.addItem(.separator())
 
         let g = app.glasses
