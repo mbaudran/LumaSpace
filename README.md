@@ -6,6 +6,7 @@
 ![Apple silicon](https://img.shields.io/badge/Apple%20silicon-arm64-black)
 ![Swift 6](https://img.shields.io/badge/Swift-6.0%2B-F05138?logo=swift&logoColor=white)
 ![No Xcode needed](https://img.shields.io/badge/Xcode-not%20required-blue)
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 LumaSpace turns VITURE Luma glasses into a multi-monitor workspace. Put up to four extra
 screens around you, move the mouse between them like real monitors, and arrange the layout
@@ -232,6 +233,11 @@ Debug environment variables:
 | `LUMA_SDK_PATH=/path` | Load a specific `libglasses.dylib` |
 
 Contributions are welcome. Please run `scripts/checks.sh` before opening a pull request.
+
+## License
+
+LumaSpace is released under the [MIT License](LICENSE). The VITURE SDK isn't part of this
+repo and isn't covered by it.
 
 ---
 
