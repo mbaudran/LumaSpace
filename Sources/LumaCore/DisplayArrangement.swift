@@ -75,3 +75,31 @@ public func originsMakingMain(_ id: UInt32, current: [UInt32: DisplayOrigin]) ->
     guard let o = current[id] else { return nil }
     return current.mapValues { DisplayOrigin(x: $0.x - o.x, y: $0.y - o.y) }
 }
+
+public enum GameModeAction: Equatable, Sendable { case wait, makeGlassesMain, openBigPicture }
+
+/// Game mode's start-up, polled while it's on. Switching the refresh rate reconnects the glasses
+/// display, and macOS can put the Mac back as main when it does, so the glasses are made main again
+/// whenever they aren't, and Big Picture opens once they've stayed main for a second (or after 10 s).
+public struct GameModeLauncher: Sendable {
+    public static let settle = 1.0
+    public static let timeout = 10.0
+    private let start: Double
+    private var mainSince: Double?
+    private var opened = false
+
+    public init(start: Double) { self.start = start }
+
+    public mutating func next(now: Double, glassesID: UInt32?, mainID: UInt32) -> GameModeAction {
+        guard let glassesID else { mainSince = nil; return .wait }
+        guard mainID == glassesID else {
+            mainSince = nil
+            if !opened && now - start > Self.timeout { opened = true; return .openBigPicture }
+            return .makeGlassesMain
+        }
+        let since = mainSince ?? now
+        mainSince = since
+        if !opened && now - since >= Self.settle { opened = true; return .openBigPicture }
+        return .wait
+    }
+}

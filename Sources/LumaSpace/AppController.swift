@@ -36,6 +36,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Game mode: LumaSpace steps aside so the glasses are a plain 120 Hz monitor showing Steam Big Picture.
     private(set) var gameMode = false
     private var mainBeforeGame: CGDirectDisplayID?
+    private var gameTimer: Timer?
     /// The refresh rate last chosen in LumaSpace; game mode restores it.
     private var rate: DisplayRate?
     /// Called after any command so menus can refresh their checkmarks and sliders.
@@ -274,25 +275,44 @@ final class AppController: NSObject, NSApplicationDelegate {
         view.isPaused = true
         capture.sync(panels: capturedPanels)
         glasses.setRate(.hz120)
-        // A refresh rate change can briefly reconnect the display; rearrange once it has settled.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self, self.gameMode else { return }
-            if let id = OutputWindow.usableGlassesScreen().flatMap(OutputWindow.displayID(of:)),
-               let origins = originsMakingMain(id, current: currentDisplayOrigins()) {
-                applyDisplayOrigins(origins)
-            }
-            if let url = URL(string: "steam://open/bigpicture"), NSWorkspace.shared.urlForApplication(toOpen: url) != nil {
-                NSWorkspace.shared.open(url)
-            } else {
-                NSLog("LumaSpace: Steam isn't installed; game mode without Big Picture")
+        NSLog("LumaSpace: game mode on (main display was \(CGMainDisplayID()))")
+        // The rate change reconnects the glasses display, and macOS may make the Mac main again
+        // when it does; keep the glasses main for as long as game mode is on.
+        var launcher = GameModeLauncher(start: CACurrentMediaTime())
+        gameTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.gameMode else { return }
+                let glassesID = OutputWindow.usableGlassesScreen().flatMap(OutputWindow.displayID(of:))
+                switch launcher.next(now: CACurrentMediaTime(), glassesID: glassesID, mainID: CGMainDisplayID()) {
+                case .wait: break
+                case .makeGlassesMain:
+                    guard let glassesID, let origins = originsMakingMain(glassesID, current: currentDisplayOrigins()) else { return }
+                    NSLog("LumaSpace: game mode: making the glasses (\(glassesID)) the main display")
+                    applyDisplayOrigins(origins)
+                case .openBigPicture:
+                    self.openBigPicture()
+                }
             }
         }
+    }
+
+    private func openBigPicture() {
+        let onGlasses = OutputWindow.usableGlassesScreen().flatMap(OutputWindow.displayID(of:)) == CGMainDisplayID()
+        NSLog("LumaSpace: game mode: opening Big Picture (glasses are main: \(onGlasses))")
+        guard let url = URL(string: "steam://open/bigpicture"), NSWorkspace.shared.urlForApplication(toOpen: url) != nil else {
+            NSLog("LumaSpace: Steam isn't installed; game mode without Big Picture")
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     /// Puts back the main display, the refresh rate and LumaSpace's screens.
     private func exitGameMode() {
         guard gameMode else { return }
         gameMode = false
+        gameTimer?.invalidate()
+        gameTimer = nil
+        NSLog("LumaSpace: game mode off")
         if let main = mainBeforeGame, let origins = originsMakingMain(main, current: currentDisplayOrigins()) {
             applyDisplayOrigins(origins)
         }
