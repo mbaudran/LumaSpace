@@ -38,3 +38,34 @@ func stereoModeChecks() {
         expect(g.setStereo(false, rate: .hz60)); expect(!g.stereo)
     }
 }
+
+func cinemaSceneChecks() {
+    check("default row puts the screen 10 m straight ahead") {
+        let l = cinemaLayout(CinemaSettings(), sourceAspect: 16.0 / 9)
+        expectNear(l.viewer.z - l.screenCenter.z, 10); expectNear(l.screenCenter.x, 0); expectNear(l.screenWidth, 8)
+    }
+    check("closer rows are nearer the screen") {
+        var s = CinemaSettings(); s.row = 0
+        let front = cinemaLayout(s, sourceAspect: nil); s.row = 6
+        expect(cinemaLayout(s, sourceAspect: nil).viewer.z - front.viewer.z > 5)
+    }
+    check("screen, viewer and every seat are inside the room; seats stay below the eyes") {
+        let l = cinemaLayout(CinemaSettings(), sourceAspect: 2.39)
+        func inside(_ p: Vec3) -> Bool {
+            abs(p.x - l.room.center.x) <= l.room.size.x / 2 && abs(p.y - l.room.center.y) <= l.room.size.y / 2
+                && abs(p.z - l.room.center.z) <= l.room.size.z / 2
+        }
+        expect(inside(l.screenCenter)); expect(inside(l.viewer)); expectEqual(l.seats.count, 84)
+        // A seat's top stays below the eye height of someone sitting in that row.
+        expect(l.seats.allSatisfy { inside($0.center) && $0.center.y + $0.size.y / 2 < 0.15 * ($0.center.z - 0.25) + 1.15 })
+    }
+    check("settings clamp and lights cycle") {
+        let c = CinemaSettings(row: 12, screenScale: .nan, lights: .lit, ipd: 0.2).clamped
+        expectEqual(c.row, 6); expectNear(c.screenScale, 1); expectNear(c.ipd, 0.075)
+        expectEqual(RoomLights.lit.next, .dark); expectNear(RoomLights.dim.ambient, 0.08)
+    }
+    check("a missing or silly source aspect falls back to 16:9") {
+        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: nil).screenHeight, 4.5)
+        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: 0).screenHeight, 4.5)
+    }
+}
