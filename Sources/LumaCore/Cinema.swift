@@ -128,3 +128,25 @@ public func cinemaLayout(_ s: CinemaSettings, sourceAspect: Double?) -> CinemaLa
     return CinemaLayout(viewer: viewer, screenCenter: screen, screenWidth: width, screenHeight: height,
                         screenRadius: T.radius, room: room, surfaces: surfaces, seats: seats, risers: risers)
 }
+
+/// The cinema's answer to a command, or nil when the command isn't about the cinema.
+/// Closer/Farther pick a seat row; Bigger/Smaller scale the screen.
+public func cinemaAdjusted(_ s: CinemaSettings, by c: Command) -> CinemaSettings? {
+    var s = s
+    switch c {
+    case .nudgeDistance(let d): s.row += d < 0 ? -1 : 1
+    case .resizeSelected(let f): s.screenScale *= f
+    case .nudgeIPD(let d): s.ipd += d
+    case .cycleRoomLights: s.lights = s.lights.next
+    default: return nil
+    }
+    return s.clamped
+}
+
+/// What the glasses show: LumaSpace's panels, a plain monitor for games, or the cinema.
+public enum OutputMode: Equatable, Sendable { case panels, game, cinema }
+
+/// Toggling the current mode goes back to panels; toggling another switches to it.
+public func outputMode(after current: OutputMode, toggling m: OutputMode) -> OutputMode {
+    current == m ? .panels : m
+}

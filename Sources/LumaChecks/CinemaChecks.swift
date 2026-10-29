@@ -69,3 +69,41 @@ func cinemaSceneChecks() {
         expectNear(cinemaLayout(CinemaSettings(), sourceAspect: 0).screenHeight, 4.5)
     }
 }
+
+func cinemaCommandChecks() {
+    check("cinema mode is in the palette as 'cinema', 'movie' and 'vr'") {
+        expectEqual(paletteMatches("cinema", in: Command.all).first, .toggleCinemaMode)
+        expect(paletteMatches("movie", in: Command.all).contains(.toggleCinemaMode))
+        expect(paletteMatches("vr", in: Command.all).contains(.toggleCinemaMode))
+    }
+    check("closer/farther pick rows, bigger/smaller scale the screen") {
+        let s = CinemaSettings()
+        expectEqual(cinemaAdjusted(s, by: .nudgeDistance(-0.25))?.row, 2)
+        expectEqual(cinemaAdjusted(s, by: .nudgeDistance(0.25))?.row, 4)
+        expectNear(cinemaAdjusted(s, by: .resizeSelected(1.1))!.screenScale, 1.1)
+        expectNear(cinemaAdjusted(s, by: .nudgeIPD(0.001))!.ipd, 0.064)
+        expectEqual(cinemaAdjusted(s, by: .cycleRoomLights)?.lights, .lit)
+        expectEqual(cinemaAdjusted(s, by: .recenter), nil)
+    }
+    check("cinema and game mode exclude each other; toggling again returns to panels") {
+        expectEqual(outputMode(after: .panels, toggling: .cinema), .cinema)
+        expectEqual(outputMode(after: .cinema, toggling: .cinema), .panels)
+        expectEqual(outputMode(after: .game, toggling: .cinema), .cinema)
+        expectEqual(outputMode(after: .cinema, toggling: .game), .game)
+    }
+    check("a layout file without cinema settings still loads") {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("luma-cinema-\(UUID()).json")
+        try #"{"version":1,"panels":[],"distance":2,"smoothFollow":false,"lockedAxes":[]}"#.write(to: url, atomically: true, encoding: .utf8)
+        let f = LayoutStore(url: url).load()
+        expectEqual(f.cinema, nil); expectNear(f.distance, 2)
+        expect(!FileManager.default.fileExists(atPath: url.path + ".bad"))
+    }
+    check("cinema settings round-trip and are clamped on load") {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("luma-cinema-\(UUID()).json")
+        let store = LayoutStore(url: url)
+        try store.save(LayoutFile(panels: [], distance: 2, smoothFollow: false, lockedAxes: [],
+                                  cinema: CinemaSettings(row: 9, screenScale: 1.2, lights: .lit, ipd: 0.06)))
+        let c = store.load().cinema
+        expectEqual(c?.row, 6); expectEqual(c?.lights, .lit); expectNear(c?.ipd ?? 0, 0.06)
+    }
+}

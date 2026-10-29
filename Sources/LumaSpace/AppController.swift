@@ -248,6 +248,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             if let id = scene.selectedID { scene.remove(id); capture.sync(panels: capturedPanels); syncVirtualScreens() }
         case .groupAll: scene.group(scene.panels.map(\.id))
         case .ungroupSelected: if let id = scene.selectedID { scene.ungroup(id) }
+        case .toggleCinemaMode, .nudgeIPD, .cycleRoomLights: break
         case .quit: NSApp.terminate(nil)
         }
         markDirty()

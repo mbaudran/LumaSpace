@@ -6,10 +6,13 @@ public struct LayoutFile: Codable, Equatable, Sendable {
     public var distance: Double
     public var smoothFollow: Bool
     public var lockedAxes: [Axis]
+    /// Missing in files saved before cinema mode existed.
+    public var cinema: CinemaSettings?
 
-    public init(version: Int = 1, panels: [Panel], distance: Double, smoothFollow: Bool, lockedAxes: [Axis]) {
+    public init(version: Int = 1, panels: [Panel], distance: Double, smoothFollow: Bool, lockedAxes: [Axis],
+                cinema: CinemaSettings? = nil) {
         self.version = version; self.panels = panels; self.distance = distance
-        self.smoothFollow = smoothFollow; self.lockedAxes = lockedAxes
+        self.smoothFollow = smoothFollow; self.lockedAxes = lockedAxes; self.cinema = cinema
     }
 
     public static var `default`: LayoutFile {
@@ -32,6 +35,7 @@ public struct LayoutStore: Sendable {
         guard let data = try? Data(contentsOf: url) else { return .default }
         if var f = try? JSONDecoder().decode(LayoutFile.self, from: data), f.version == 1 {
             f.distance = f.distance.isFinite ? clamp(f.distance, SceneLimits.distance) : 2
+            f.cinema = f.cinema?.clamped
             return f
         }
         let bad = URL(fileURLWithPath: url.path + ".bad")
