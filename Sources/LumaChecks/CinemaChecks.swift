@@ -114,3 +114,34 @@ func cinemaScreenChangeChecks() {
         expect(!screenChangeIgnored(now: 1, until: nil))
     }
 }
+
+func cinemaReviewFixChecks() {
+    check("after a mode-switch blink the glasses window goes back onto the glasses, not to the preview") {
+        expectEqual(glassesWindowAction(hasUsableScreen: true, onIt: false, frameMatches: false, switchingModes: false), .rehome)
+        expectEqual(glassesWindowAction(hasUsableScreen: true, onIt: false, frameMatches: false, switchingModes: true), .rehome)
+        expectEqual(glassesWindowAction(hasUsableScreen: true, onIt: true, frameMatches: false, switchingModes: false), .resize)
+        expectEqual(glassesWindowAction(hasUsableScreen: true, onIt: true, frameMatches: true, switchingModes: false), .keep)
+    }
+    check("a missing glasses display only falls back to the preview outside a mode switch") {
+        expectEqual(glassesWindowAction(hasUsableScreen: false, onIt: false, frameMatches: false, switchingModes: false), .fallBack)
+        expectEqual(glassesWindowAction(hasUsableScreen: false, onIt: false, frameMatches: false, switchingModes: true), .keep)
+    }
+    check("glasses aren't declared lost while they switch display modes") {
+        expect(!glassesLost(missedPolls: 2, sampleAge: 4, connectedFor: 10, switchingModes: true))
+        expect(glassesLost(missedPolls: 2, sampleAge: 4, connectedFor: 10, switchingModes: false))
+    }
+    check("refresh rate picked in the cinema waits until the cinema ends") {
+        expectEqual(rateToSend(.hz120, mode: .cinema), nil)
+        expectEqual(rateToSend(.hz120, mode: .panels), .hz120)
+    }
+    check("tall or square sources fit the screen box instead of growing taller") {
+        let square = cinemaLayout(CinemaSettings(), sourceAspect: 0.9)
+        expectNear(square.screenHeight, 3.375); expectNear(square.screenWidth, 3.375 * 0.9)
+        let wide = cinemaLayout(CinemaSettings(), sourceAspect: 2.39)
+        expectNear(wide.screenWidth, 6); expectNear(wide.screenHeight, 6 / 2.39)
+    }
+    check("risers stop short of the side walls (no flicker where they'd overlap)") {
+        let l = cinemaLayout(CinemaSettings(), sourceAspect: nil)
+        expect(l.risers.allSatisfy { $0.size.x < l.room.size.x })
+    }
+}

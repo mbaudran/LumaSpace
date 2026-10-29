@@ -81,6 +81,8 @@ private enum Theater {
     static let rowRise = 0.15, rowSpacing = 1.0, eyeHeight = 1.15
     static let seatsPerRow = 12, seatPitch = 0.55
     static let screenZ = -7.0, screenBottom = 1.0, screenWidth = 6.0, radius = 10.0
+    /// The screen fits a 16:9 box this wide: wider sources get shorter, taller ones narrower.
+    static let screenHeight = screenWidth * 9 / 16
     static let wall = Vec3(x: 0.45, y: 0.40, z: 0.36)
     static let floor = Vec3(x: 0.18, y: 0.08, z: 0.08)
     static let ceiling = Vec3(x: 0.20, y: 0.20, z: 0.22)
@@ -90,7 +92,8 @@ public func cinemaLayout(_ s: CinemaSettings, sourceAspect: Double?) -> CinemaLa
     typealias T = Theater
     let s = s.clamped
     let aspect = sourceAspect.flatMap { $0.isFinite && SceneLimits.aspect.contains($0) ? $0 : nil } ?? 16.0 / 9
-    let width = T.screenWidth * s.screenScale, height = width / aspect
+    let boxW = T.screenWidth * s.screenScale, boxH = T.screenHeight * s.screenScale
+    let width = min(boxW, boxH * aspect), height = width / aspect
     let screen = Vec3(x: 0, y: T.screenBottom + height / 2, z: T.screenZ)
     let viewer = Vec3(x: 0, y: T.rowRise * Double(s.row) + T.eyeHeight, z: Double(s.row) * T.rowSpacing)
 
@@ -122,7 +125,7 @@ public func cinemaLayout(_ s: CinemaSettings, sourceAspect: Double?) -> CinemaLa
             seats.append(CinemaBox(center: Vec3(x: x, y: floor + 0.45, z: z + 0.25), size: Vec3(x: 0.5, y: 0.9, z: 0.5)))
         }
         if r > 0 {
-            risers.append(CinemaBox(center: Vec3(x: 0, y: floor / 2, z: z), size: Vec3(x: halfW * 2, y: floor, z: T.rowSpacing)))
+            risers.append(CinemaBox(center: Vec3(x: 0, y: floor / 2, z: z), size: Vec3(x: halfW * 2 - 0.02, y: floor, z: T.rowSpacing)))
         }
     }
     return CinemaLayout(viewer: viewer, screenCenter: screen, screenWidth: width, screenHeight: height,
@@ -151,7 +154,23 @@ public func outputMode(after current: OutputMode, toggling m: OutputMode) -> Out
     current == m ? .panels : m
 }
 
-/// Switching display modes makes the glasses display blink; screen changes until `until` are ignored.
+/// Switching display modes makes the glasses display blink; until `until` it counts as switching.
 public func screenChangeIgnored(now: Double, until: Double?) -> Bool {
     until.map { now < $0 } ?? false
+}
+
+public enum GlassesWindowAction: Equatable, Sendable { case keep, resize, rehome, fallBack }
+
+/// What to do with the glasses output window when displays change. While the glasses switch
+/// display modes their display can vanish for a moment: wait instead of falling back to the preview.
+public func glassesWindowAction(hasUsableScreen: Bool, onIt: Bool, frameMatches: Bool,
+                                switchingModes: Bool) -> GlassesWindowAction {
+    guard hasUsableScreen else { return switchingModes ? .keep : .fallBack }
+    if !onIt { return .rehome }
+    return frameMatches ? .keep : .resize
+}
+
+/// A refresh rate picked in the cinema is kept for when it ends; the glasses stay in 3D till then.
+public func rateToSend(_ r: DisplayRate, mode: OutputMode) -> DisplayRate? {
+    mode == .cinema ? nil : r
 }

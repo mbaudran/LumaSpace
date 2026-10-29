@@ -265,7 +265,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .resizeSelected(let f):
             if let id = scene.selectedID, let p = scene.panel(id) { scene.resize(id, width: p.width * f) }
         case .adjustLevel(let k, let d): glasses.setLevel(k, (glasses.level(k) ?? 0) + d)
-        case .setRate(let r): glasses.setRate(r); rate = r
+        case .setRate(let r):
+            rate = r
+            if let r = rateToSend(r, mode: mode) { glasses.setRate(r) } else { rateBeforeCinema = r }
         case .toggleSmoothFollow: tracker.smoothFollow.toggle()
         case .toggleAxisLock(let a):
             if tracker.lockedAxes.contains(a) { tracker.lockedAxes.remove(a) } else { tracker.lockedAxes.insert(a) }
@@ -374,11 +376,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: w, height: w * height / width))
     }
 
-    /// Ignores the display blink from a mode switch, then fits the glasses window to whatever it became.
+    /// The glasses display blinks (and may pause tracking) while switching modes; for a few seconds
+    /// LumaSpace waits for it instead of giving up, then fits the window to whatever it became.
     private func ignoreScreenChanges() {
-        ignoreScreenChangesUntil = CACurrentMediaTime() + 3
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.1) { [weak self] in self?.screensChanged() }
+        ignoreScreenChangesUntil = CACurrentMediaTime() + 5
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.1) { [weak self] in self?.screensChanged() }
     }
+
+    private var switchingModes: Bool { screenChangeIgnored(now: CACurrentMediaTime(), until: ignoreScreenChangesUntil) }
 
     /// Hides LumaSpace on the glasses, switches them to 120 Hz, makes them the main display (so
     /// fullscreen apps open there and only there) and opens Steam Big Picture.
@@ -515,7 +520,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         if let real = glasses as? VitureGlasses {
             missedPolls = pids.contains(real.pid) ? 0 : missedPolls + 1
             if glassesLost(missedPolls: missedPolls, sampleAge: real.sampleAge,
-                           connectedFor: CACurrentMediaTime() - real.connectedAt) {
+                           connectedFor: CACurrentMediaTime() - real.connectedAt, switchingModes: switchingModes) {
                 NSLog("LumaSpace: glasses disconnected or pose stream stopped")
                 useSimulator(reason: "Glasses not connected")  // the next poll reconnects if they're back
             } else if glassesWindow == nil {
@@ -550,14 +555,20 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Leaves the glasses output as soon as the VITURE display goes away or turns into a mirror.
     private func screensChanged() {
         // In game mode the window is hidden and the display may blink during the rate change.
-        guard !gameMode, !screenChangeIgnored(now: CACurrentMediaTime(), until: ignoreScreenChangesUntil),
-              let gw = glassesWindow else { return }
+        guard !gameMode, let gw = glassesWindow else { return }
         let screen = OutputWindow.usableGlassesScreen()
-        if screen == nil || gw.screen != screen {
+        switch glassesWindowAction(hasUsableScreen: screen != nil, onIt: gw.screen == screen,
+                                   frameMatches: gw.frame == screen?.frame, switchingModes: switchingModes) {
+        case .keep: break
+        case .resize:
+            gw.setFrame(screen!.frame, display: true)  // displays were rearranged or changed size
+        case .rehome:
+            // The display came back (e.g. after a mode switch) but macOS moved our window away.
+            gw.setFrame(screen!.frame, display: true)
+            gw.orderFrontRegardless()
+        case .fallBack:
             NSLog("LumaSpace: VITURE display gone or mirrored; back to the preview")
             moveOutputToPreview()
-        } else if let screen, gw.frame != screen.frame {
-            gw.setFrame(screen.frame, display: true)  // displays were rearranged
         }
     }
 
