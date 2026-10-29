@@ -18,6 +18,11 @@ public enum GlassesStatus: Equatable, Sendable {
 
 public enum DisplayRate: Int, CaseIterable, Sendable { case hz60 = 60, hz90 = 90, hz120 = 120 }
 
+/// VITURE 3D SBS display modes to try, best first: 3840×1200 @ 90 Hz (0x45), then @ 60 Hz (0x42).
+public func stereoDisplayModes(for rate: DisplayRate) -> [Int32] {
+    rate == .hz60 ? [0x42] : [0x45, 0x42]
+}
+
 public enum GlassesEvent: Sendable { case levelChanged(LevelKind, Int), disconnected }
 
 /// Everything the app needs from a pair of glasses, real or simulated.
@@ -30,6 +35,9 @@ public protocol GlassesLink: AnyObject {
     func maxLevel(_ k: LevelKind) -> Int?
     func setLevel(_ k: LevelKind, _ v: Int)
     func setRate(_ r: DisplayRate)
+    /// On: switch to a 3D side-by-side mode; returns whether the glasses accepted one.
+    /// Off: back to 2D at `rate`.
+    func setStereo(_ on: Bool, rate: DisplayRate) -> Bool
     var onEvent: ((GlassesEvent) -> Void)? { get set }
     func stop()
 }

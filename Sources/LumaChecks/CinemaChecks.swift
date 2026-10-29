@@ -24,3 +24,17 @@ func stereoChecks() {
         expectNear(eyeAspect(drawableWidth: 3840, drawableHeight: 0), 1.6)
     }
 }
+
+@MainActor
+func stereoModeChecks() {
+    check("90 and 120 Hz ask for 3D at 90 Hz, then 60 Hz") {
+        expectEqual(stereoDisplayModes(for: .hz90), [0x45, 0x42])
+        expectEqual(stereoDisplayModes(for: .hz120), [0x45, 0x42])
+        expectEqual(stereoDisplayModes(for: .hz60), [0x42])
+    }
+    check("simulated glasses accept stereo and drop it again") {
+        let g = SimulatedGlasses(reason: "test")
+        expect(g.setStereo(true, rate: .hz90)); expect(g.stereo)
+        expect(g.setStereo(false, rate: .hz60)); expect(!g.stereo)
+    }
+}

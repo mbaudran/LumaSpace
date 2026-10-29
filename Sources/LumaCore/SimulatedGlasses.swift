@@ -20,5 +20,12 @@ public final class SimulatedGlasses: GlassesLink {
     }
 
     public func setRate(_ r: DisplayRate) {}
+
+    public private(set) var stereo = false
+
+    public func setStereo(_ on: Bool, rate: DisplayRate) -> Bool {
+        stereo = on
+        return true
+    }
     public func stop() {}
 }

@@ -269,6 +269,17 @@ final class VitureGlasses: GlassesLink {
         if rc != vitureSuccess { NSLog("LumaSpace: set display mode failed (\(rc))") }
     }
 
+    func setStereo(_ on: Bool, rate: DisplayRate) -> Bool {
+        guard on else { setRate(rate); return true }
+        guard let h = handle else { return false }
+        for mode in stereoDisplayModes(for: rate) {
+            let rc = lib.setDisplayMode(h, mode)
+            if rc == vitureSuccess { return true }
+            NSLog("LumaSpace: 3D display mode 0x\(String(mode, radix: 16)) rejected (\(rc))")
+        }
+        return false
+    }
+
     func stop() { teardown() }
 
     private func teardown() {
