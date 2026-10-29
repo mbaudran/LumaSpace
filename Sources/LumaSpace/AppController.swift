@@ -34,11 +34,21 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let bringUp = RetryGate<Int>(delay: 15)
     private var recenterOnFirstSample = false
     /// Game mode: LumaSpace steps aside so the glasses are a plain 120 Hz monitor showing Steam Big Picture.
-    private(set) var gameMode = false
+    /// What the glasses show: panels, game mode or the cinema.
+    private(set) var mode: OutputMode = .panels
+    var gameMode: Bool { mode == .game }
     private var mainBeforeGame: CGDirectDisplayID?
     private var gameTimer: Timer?
     /// The refresh rate last chosen in LumaSpace; game mode restores it.
     private var rate: DisplayRate?
+    /// Cinema mode: one source on a big screen in a stereo theater.
+    private(set) var cinema = CinemaSettings()
+    private var cinemaSource: PanelSource?
+    private var cinemaSourceAvailable = true
+    private let cinemaPanelID = UUID()
+    private var rateBeforeCinema: DisplayRate?
+    /// Display mode switches make the glasses display blink; screen changes are ignored until then.
+    private var ignoreScreenChangesUntil: Double?
     /// Called after any command so menus can refresh their checkmarks and sliders.
     var onStateChange: () -> Void = {}
 
@@ -117,12 +127,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         Snapshot.installIfRequested(renderer: renderer, view: view)
         // `LUMA_CINEMA=test`: the cinema with colour bars on the screen, for checking it without glasses.
         if ProcessInfo.processInfo.environment["LUMA_CINEMA"] == "test",
-           let c = CinemaRenderer(device: renderer.device, colorPixelFormat: view.colorPixelFormat) {
-            let bars = CinemaRenderer.testPattern(device: renderer.device)
-            c.screenTexture = { bars }
-            renderer.cinema = c
-            window.contentAspectRatio = NSSize(width: 32, height: 10)
-            window.setContentSize(NSSize(width: 1600, height: 500))
+           let bars = CinemaRenderer.testPattern(device: renderer.device) {
+            startCinema(source: nil, testPattern: bars)
         }
         Demo.runIfRequested(self)
         palette.run = { [unowned self] c in self.perform(c) }
@@ -187,6 +193,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ n: Notification) {
         exitGameMode()
+        exitCinemaMode()
         dirty = true
         saveIfDirty()
     }
@@ -214,6 +221,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Holding ⌃⌥ grabs the panel at the centre of view; mouse movement moves it.
     /// Polled each frame: global event monitors would need Accessibility permission.
     private func updateGrab() {
+        guard mode != .cinema else { return }  // nothing to grab in the theater
         let down = NSEvent.modifierFlags.intersection([.control, .option, .command, .shift]) == [.control, .option]
         let held = grabArming.update(held: down, now: CACurrentMediaTime())
         let mouse = NSEvent.mouseLocation
@@ -240,6 +248,16 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// The single place commands run — menu, palette, shortcuts and keys all come here.
     func perform(_ c: Command) {
+        // In the cinema, Closer/Farther and Bigger/Smaller move seats and size the screen;
+        // eye distance and room lights can be set any time.
+        let anyMode = switch c { case .nudgeIPD, .cycleRoomLights: true; default: false }
+        if mode == .cinema || anyMode, let s = cinemaAdjusted(cinema, by: c) {
+            cinema = s
+            renderer.cinema?.settings = s
+            markDirty()
+            onStateChange()
+            return
+        }
         switch c {
         case .recenter: recenter()
         case .applyPreset(let preset): apply(preset)
@@ -252,7 +270,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .toggleAxisLock(let a):
             if tracker.lockedAxes.contains(a) { tracker.lockedAxes.remove(a) } else { tracker.lockedAxes.insert(a) }
         case .toggleSnap: scene.snap.enabled.toggle()
-        case .toggleGameMode: if gameMode { exitGameMode() } else { enterGameMode() }
+        case .toggleGameMode: switchMode(to: outputMode(after: mode, toggling: .game))
+        case .toggleCinemaMode: switchMode(to: outputMode(after: mode, toggling: .cinema))
         case .addSource: addSource()
         case .newVirtualScreen: newVirtualScreen()
         case .arrangeDisplays: arrangeDisplays(for: scene.panels, virtualIDs: virtualDisplays.ids)
@@ -260,7 +279,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             if let id = scene.selectedID { scene.remove(id); capture.sync(panels: capturedPanels); syncVirtualScreens() }
         case .groupAll: scene.group(scene.panels.map(\.id))
         case .ungroupSelected: if let id = scene.selectedID { scene.ungroup(id) }
-        case .toggleCinemaMode, .nudgeIPD, .cycleRoomLights: break
+        case .nudgeIPD, .cycleRoomLights: break  // handled above
         case .quit: NSApp.terminate(nil)
         }
         markDirty()
@@ -275,6 +294,92 @@ final class AppController: NSObject, NSApplicationDelegate {
         Task { await refreshSources() }
     }
 
+    private func switchMode(to new: OutputMode) {
+        guard new != mode else { return }
+        switch new {
+        case .panels: exitGameMode(); exitCinemaMode()
+        case .game: exitCinemaMode(); enterGameMode()
+        case .cinema: enterCinemaMode()  // leaves game mode once a source is chosen
+        }
+    }
+
+    /// Shows the selected panel's source (or one picked now) in the stereo theater.
+    private func enterCinemaMode() {
+        if let source = scene.selectedID.flatMap({ scene.panel($0) })?.source, source.key != nil {
+            startCinema(source: source)
+            return
+        }
+        Task {
+            await refreshSources()
+            picker.present(sources: offeredSources, over: glassesWindow ?? window) { source in
+                guard let source else { return }  // cancelled: stay where we were
+                self.startCinema(source: source)
+            }
+        }
+    }
+
+    /// `source` nil shows `testPattern` instead (LUMA_CINEMA=test).
+    private func startCinema(source: PanelSource?, testPattern: MTLTexture? = nil) {
+        exitGameMode()
+        guard mode != .cinema, let c = CinemaRenderer(device: renderer.device, colorPixelFormat: view.colorPixelFormat) else {
+            NSSound.beep()
+            return
+        }
+        mode = .cinema
+        cinemaSource = source
+        cinemaSourceAvailable = true
+        rateBeforeCinema = rate ?? .hz60
+        ignoreScreenChanges()
+        if !glasses.setStereo(true, rate: .hz90) {
+            NSLog("LumaSpace: cinema: glasses refused 3D mode; showing side by side in 2D")
+        }
+        c.settings = cinema
+        if let source {
+            c.screenTexture = { [unowned self] in source.key.flatMap { self.capture.texture(for: $0) } }
+            c.fallbackTexture = { [unowned self] in self.renderer.sourceCard(for: source, available: self.cinemaSourceAvailable) }
+        } else {
+            c.screenTexture = { testPattern }
+        }
+        grab.end()
+        grabMouse = nil
+        renderer.showReticle = false
+        renderer.cinema = c
+        setPreviewAspect(width: 32, height: 10)
+        capture.sync(panels: capturedPanels)
+        NSLog("LumaSpace: cinema mode on (\(source?.label ?? "test pattern"))")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            guard let s = OutputWindow.glassesScreen(), let id = OutputWindow.displayID(of: s),
+                  let m = CGDisplayCopyDisplayMode(id) else { return }
+            NSLog("LumaSpace: cinema: glasses display is now \(m.pixelWidth)x\(m.pixelHeight) px")
+        }
+        onStateChange()
+    }
+
+    private func exitCinemaMode() {
+        guard mode == .cinema else { return }
+        mode = .panels
+        renderer.cinema = nil
+        cinemaSource = nil
+        ignoreScreenChanges()
+        _ = glasses.setStereo(false, rate: rateBeforeCinema ?? .hz60)
+        setPreviewAspect(width: 16, height: 9)
+        NSLog("LumaSpace: cinema mode off")
+        Task { await refreshSources() }
+        onStateChange()
+    }
+
+    private func setPreviewAspect(width: CGFloat, height: CGFloat) {
+        window.contentAspectRatio = NSSize(width: width, height: height)
+        let w = window.contentLayoutRect.width
+        window.setContentSize(NSSize(width: w, height: w * height / width))
+    }
+
+    /// Ignores the display blink from a mode switch, then fits the glasses window to whatever it became.
+    private func ignoreScreenChanges() {
+        ignoreScreenChangesUntil = CACurrentMediaTime() + 3
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.1) { [weak self] in self?.screensChanged() }
+    }
+
     /// Hides LumaSpace on the glasses, switches them to 120 Hz, makes them the main display (so
     /// fullscreen apps open there and only there) and opens Steam Big Picture.
     private func enterGameMode() {
@@ -282,7 +387,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             NSSound.beep()  // needs the glasses connected and showing LumaSpace
             return
         }
-        gameMode = true
+        mode = .game
         mainBeforeGame = CGMainDisplayID()
         gw.orderOut(nil)
         view.isPaused = true
@@ -322,7 +427,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Puts back the main display, the refresh rate and LumaSpace's screens.
     private func exitGameMode() {
         guard gameMode else { return }
-        gameMode = false
+        mode = .panels
         gameTimer?.invalidate()
         gameTimer = nil
         NSLog("LumaSpace: game mode off")
@@ -339,8 +444,18 @@ final class AppController: NSObject, NSApplicationDelegate {
         Task { await refreshSources() }
     }
 
-    /// Panels whose sources are captured; none in game mode.
-    private var capturedPanels: [Panel] { gameMode ? [] : scene.panels }
+    /// Panels whose sources are captured: none in game mode, just the screen's source in the cinema.
+    private var capturedPanels: [Panel] {
+        switch mode {
+        case .game: return []
+        case .panels: return scene.panels
+        case .cinema:
+            guard let source = cinemaSource else { return [] }
+            var p = Panel(id: cinemaPanelID, source: source, yaw: 0, pitch: 0, distance: 1, width: 1, aspect: 16.0 / 9)
+            p.available = cinemaSourceAvailable
+            return [p]
+        }
+    }
 
     /// Adds a new virtual screen where you're looking.
     private func newVirtualScreen() {
@@ -435,7 +550,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Leaves the glasses output as soon as the VITURE display goes away or turns into a mirror.
     private func screensChanged() {
         // In game mode the window is hidden and the display may blink during the rate change.
-        guard !gameMode, let gw = glassesWindow else { return }
+        guard !gameMode, !screenChangeIgnored(now: CACurrentMediaTime(), until: ignoreScreenChangesUntil),
+              let gw = glassesWindow else { return }
         let screen = OutputWindow.usableGlassesScreen()
         if screen == nil || gw.screen != screen {
             NSLog("LumaSpace: VITURE display gone or mirrored; back to the preview")
@@ -447,6 +563,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func useSimulator(reason: String) {
         exitGameMode()
+        exitCinemaMode()
         glasses.stop()
         let sim = SimulatedGlasses(reason: reason)
         glasses = sim
@@ -499,6 +616,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             markDirty()
         }
         scene.updateAvailability(available: r.existing)
+        if let key = cinemaSource?.key { cinemaSourceAvailable = r.existing.contains(key) }
         capture.sync(panels: capturedPanels)
     }
 
@@ -510,13 +628,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         distance = f.distance
         tracker.smoothFollow = f.smoothFollow
         tracker.lockedAxes = Set(f.lockedAxes)
+        cinema = f.cinema ?? CinemaSettings()
     }
 
     private func saveIfDirty() {
         guard dirty else { return }
         dirty = false
         let f = LayoutFile(panels: scene.panels, distance: distance, smoothFollow: tracker.smoothFollow,
-                           lockedAxes: Axis.allCases.filter { tracker.lockedAxes.contains($0) })
+                           lockedAxes: Axis.allCases.filter { tracker.lockedAxes.contains($0) }, cinema: cinema)
         do { try store.save(f) } catch { NSLog("LumaSpace: could not save layout: \(error)") }
     }
 }

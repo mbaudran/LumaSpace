@@ -150,3 +150,8 @@ public enum OutputMode: Equatable, Sendable { case panels, game, cinema }
 public func outputMode(after current: OutputMode, toggling m: OutputMode) -> OutputMode {
     current == m ? .panels : m
 }
+
+/// Switching display modes makes the glasses display blink; screen changes until `until` are ignored.
+public func screenChangeIgnored(now: Double, until: Double?) -> Bool {
+    until.map { now < $0 } ?? false
+}

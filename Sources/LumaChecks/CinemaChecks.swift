@@ -107,3 +107,10 @@ func cinemaCommandChecks() {
         expectEqual(c?.row, 6); expectEqual(c?.lights, .lit); expectNear(c?.ipd ?? 0, 0.06)
     }
 }
+
+func cinemaScreenChangeChecks() {
+    check("screen changes are ignored for a grace period after a mode switch") {
+        expect(screenChangeIgnored(now: 1, until: 3)); expect(!screenChangeIgnored(now: 3.5, until: 3))
+        expect(!screenChangeIgnored(now: 1, until: nil))
+    }
+}

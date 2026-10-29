@@ -62,6 +62,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(command(.arrangeDisplays))
         menu.addItem(command(.recenter))
         menu.addItem(command(.toggleGameMode, checked: app.gameMode))
+        menu.addItem(command(.toggleCinemaMode, checked: app.mode == .cinema))
+        let cinema = NSMenu()
+        cinema.addItem(command(.cycleRoomLights, title: "Room Lights: \(app.cinema.lights.title)"))
+        cinema.addItem(command(.nudgeIPD(0.001), title: "Eye Distance + (\(Int((app.cinema.ipd * 1000).rounded())) mm)"))
+        cinema.addItem(command(.nudgeIPD(-0.001), title: "Eye Distance −"))
+        menu.addItem(submenu("Cinema", cinema))
         menu.addItem(.separator())
 
         let g = app.glasses

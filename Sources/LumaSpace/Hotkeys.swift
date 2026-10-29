@@ -27,6 +27,7 @@ final class Hotkeys {
             HotkeySpec(keyCode: kVK_ANSI_A, shift: false, label: "⌃⌥A", action: .command(.addSource)),
             HotkeySpec(keyCode: kVK_ANSI_N, shift: false, label: "⌃⌥N", action: .command(.newVirtualScreen)),
             HotkeySpec(keyCode: kVK_ANSI_G, shift: false, label: "⌃⌥G", action: .command(.toggleGameMode)),
+            HotkeySpec(keyCode: kVK_ANSI_C, shift: false, label: "⌃⌥C", action: .command(.toggleCinemaMode)),
             HotkeySpec(keyCode: kVK_ANSI_B, shift: false, label: "⌃⌥B", action: .command(.adjustLevel(.brightness, 1))),
             HotkeySpec(keyCode: kVK_ANSI_B, shift: true, label: "⌃⌥⇧B", action: .command(.adjustLevel(.brightness, -1))),
         ]

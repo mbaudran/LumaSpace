@@ -155,6 +155,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         return tex
     }
 
+    /// The placeholder card for a source outside the panels (the cinema screen).
+    func sourceCard(for source: PanelSource, available: Bool) -> MTLTexture? {
+        var p = Panel(source: source, yaw: 0, pitch: 0, distance: 1, width: 1, aspect: 16.0 / 9)
+        p.available = available
+        return label(for: p)
+    }
+
     /// Placeholder card: the source name, or "Source unavailable" when it's gone.
     private func label(for p: Panel) -> MTLTexture? {
         let title = p.available ? p.source.label : "Source unavailable"

@@ -30,6 +30,10 @@ if CommandLine.arguments.contains("--diagnose") || CommandLine.arguments.contain
         print("  \(s.localizedName) \(Int(s.frame.width))x\(Int(s.frame.height))\(CGDisplayIsInMirrorSet(id) != 0 ? " (mirrored)" : "")")
     }
     print("glasses display: \(OutputWindow.usableGlassesScreen()?.localizedName ?? "none usable")")
+    // Cinema mode needs the glasses at 3840 px wide (3D side by side); 1920 means 2D.
+    if let s = OutputWindow.glassesScreen(), let id = OutputWindow.displayID(of: s), let m = CGDisplayCopyDisplayMode(id) {
+        print("glasses display mode: \(m.pixelWidth)x\(m.pixelHeight) px @ \(Int(m.refreshRate)) Hz")
+    }
     let others = NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
         .filter { $0.range(of: "spacewalker", options: .caseInsensitive) != nil }
     print("spacewalker running: \(others.isEmpty ? "no" : "YES — quit it")")
