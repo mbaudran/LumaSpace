@@ -28,6 +28,8 @@ It's a small menu-bar app built on VITURE's official SDK, and it works without S
   Triple create the extra screens for you.
 - **🎮 Game mode.** ⌃⌥G hands the glasses over to Steam Big Picture at 120 Hz: fixed in
   view, with no added delay, shown only on the glasses.
+- **🎬 Cinema mode.** ⌃⌥C puts any window or display on a giant screen in a 3D theater lit by
+  the movie.
 - **⌨️ Keyboard first.** Global shortcuts plus a command palette (⌃⌥Space) for everything.
 - **🪟 Any window or display.** Pin a single app window or your Mac's own screen as a panel.
 - **💡 Glasses controls.** Brightness, volume and refresh rate from the menu bar.
@@ -104,6 +106,7 @@ Everything lives under the **👓 icon** in the menu bar and in the **command pa
 | ⌃⌥N | New virtual screen |
 | ⌃⌥A | Add a window or display |
 | ⌃⌥G | Game mode on/off |
+| ⌃⌥C | Cinema mode on/off |
 | ⌃⌥= / ⌃⌥- | Screens closer / farther |
 | ⌃⌥] / ⌃⌥[ | Selected screen bigger / smaller |
 | ⌃⌥F | Smooth Follow on/off |
@@ -149,6 +152,26 @@ that LumaSpace creates, and macOS treats it like a plugged-in display.
 Press **⌃⌥G** again to get your screens back. The main display and refresh rate return to how
 they were. Quitting LumaSpace or unplugging the glasses also ends game mode.
 
+### Cinema mode
+
+**⌃⌥C** shows one window or display on a big curved screen in a virtual theater, in 3D:
+
+- It uses the selected screen's window or display; with none selected, you pick one.
+  Play a movie in any app (browser, IINA, VLC…) and watch it there.
+- The glasses switch to 3D side-by-side mode, so the room has real depth. The walls and seats
+  pick up the colours of the movie.
+- **⌃⌥=** / **⌃⌥-** move a row closer or farther, **⌃⌥]** / **⌃⌥[** make the screen bigger
+  or smaller. **Cinema → Room Lights** (menu bar or palette) switches between Dark, Dim and
+  Lit. On the glasses black is see-through, so Dark shows your real room around the screen.
+- If the screen looks doubled, adjust **Cinema → Eye Distance** (55–75 mm).
+
+Press **⌃⌥C** again to get your screens back at the previous refresh rate. Quitting LumaSpace
+or unplugging the glasses also ends cinema mode.
+
+**Testing it on glasses:** if you see two squeezed copies of the theater side by side instead
+of one 3D picture, the glasses didn't switch to 3D. Run `LumaSpace --diagnose` while cinema
+mode is on and send the "glasses display mode" line (3840 px wide means 3D worked).
+
 ### Simulator
 
 Without glasses, LumaSpace runs in a preview window so you can set up layouts at your desk:
@@ -190,6 +213,7 @@ LumaSpace is young. Here's what has been confirmed on real Luma glasses so far:
 | Virtual screens, moving the mouse between them | ✅ Confirmed |
 | Recenter, brightness/volume buttons, refresh rate switching | ⏳ Not yet confirmed |
 | Game mode (120 Hz + Steam Big Picture) | ⏳ Not yet confirmed |
+| Cinema mode (3D switch, depth, room brightness, exit back to 2D) | ⏳ Not yet confirmed |
 | Unplug / replug recovery | ⏳ Not yet confirmed |
 
 Other VITURE models that the SDK accepts might work but are untested. Luma Ultra's 6DoF
@@ -237,7 +261,8 @@ Debug environment variables:
 |---|---|
 | `LUMA_LAYOUT=/path.json` | Use a different layout file |
 | `LUMA_SNAPSHOT=/path.png` | Save a rendered frame and quit (`LUMA_SNAPSHOT_FRAME=N` picks the frame) |
-| `LUMA_SIM_YAW=20` | Turn the simulated head |
+| `LUMA_SIM_YAW=20` / `LUMA_SIM_PITCH=-25` | Turn / tilt the simulated head |
+| `LUMA_CINEMA=test` | Start in cinema mode with colour bars on the screen |
 | `LUMA_DEMO=triple-drag` / `palette` | Scripted demos for testing without input |
 | `LUMA_SDK_PATH=/path` | Load a specific `libglasses.dylib` |
 
