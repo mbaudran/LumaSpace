@@ -80,7 +80,7 @@ public struct CinemaLayout: Equatable, Sendable {
 private enum Theater {
     static let rowRise = 0.15, rowSpacing = 1.0, eyeHeight = 1.15
     static let seatsPerRow = 12, seatPitch = 0.55
-    static let screenZ = -7.0, screenBottom = 1.0, screenWidth = 8.0, radius = 10.0
+    static let screenZ = -7.0, screenBottom = 1.0, screenWidth = 6.0, radius = 10.0
     static let wall = Vec3(x: 0.45, y: 0.40, z: 0.36)
     static let floor = Vec3(x: 0.18, y: 0.08, z: 0.08)
     static let ceiling = Vec3(x: 0.20, y: 0.20, z: 0.22)

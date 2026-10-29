@@ -111,7 +111,19 @@ final class AppController: NSObject, NSApplicationDelegate {
         if let yaw = ProcessInfo.processInfo.environment["LUMA_SIM_YAW"].flatMap(Double.init) {
             (glasses as? SimulatedGlasses)?.yaw = yaw * .pi / 180
         }
+        if let pitch = ProcessInfo.processInfo.environment["LUMA_SIM_PITCH"].flatMap(Double.init) {
+            (glasses as? SimulatedGlasses)?.pitch = pitch * .pi / 180
+        }
         Snapshot.installIfRequested(renderer: renderer, view: view)
+        // `LUMA_CINEMA=test`: the cinema with colour bars on the screen, for checking it without glasses.
+        if ProcessInfo.processInfo.environment["LUMA_CINEMA"] == "test",
+           let c = CinemaRenderer(device: renderer.device, colorPixelFormat: view.colorPixelFormat) {
+            let bars = CinemaRenderer.testPattern(device: renderer.device)
+            c.screenTexture = { bars }
+            renderer.cinema = c
+            window.contentAspectRatio = NSSize(width: 32, height: 10)
+            window.setContentSize(NSSize(width: 1600, height: 500))
+        }
         Demo.runIfRequested(self)
         palette.run = { [unowned self] c in self.perform(c) }
         hotkeys = Hotkeys { [unowned self] action in

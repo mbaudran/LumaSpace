@@ -61,9 +61,16 @@ if [ "$nosdk" = no ]; then
 else
     echo "note: built without the VITURE SDK — use \"Set Up VITURE SDK…\" in the app's menu"
 fi
-# Finder/iCloud attributes (e.g. when the repo lives in Documents) make codesign refuse the bundle.
-xattr -cr "$app"
-codesign --force --deep -s - "$app"
+# iCloud-synced folders (e.g. Documents) tag the bundle with attributes codesign refuses and
+# xattr can't remove, so sign a clean copy outside and copy it back.
+signdir=$(mktemp -d)
+ditto --noextattr "$app" "$signdir/$(basename "$app")"
+xattr -cr "$signdir/$(basename "$app")"
+codesign --force --deep -s - "$signdir/$(basename "$app")"
+rm -rf "$app"
+ditto "$signdir/$(basename "$app")" "$app"
+rm -rf "$signdir"
+codesign --verify --deep "$app"
 echo "built $app"
 
 if [ "$install" = yes ]; then

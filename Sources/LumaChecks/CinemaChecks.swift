@@ -42,7 +42,7 @@ func stereoModeChecks() {
 func cinemaSceneChecks() {
     check("default row puts the screen 10 m straight ahead") {
         let l = cinemaLayout(CinemaSettings(), sourceAspect: 16.0 / 9)
-        expectNear(l.viewer.z - l.screenCenter.z, 10); expectNear(l.screenCenter.x, 0); expectNear(l.screenWidth, 8)
+        expectNear(l.viewer.z - l.screenCenter.z, 10); expectNear(l.screenCenter.x, 0); expectNear(l.screenWidth, 6)
     }
     check("closer rows are nearer the screen") {
         var s = CinemaSettings(); s.row = 0
@@ -65,8 +65,8 @@ func cinemaSceneChecks() {
         expectEqual(RoomLights.lit.next, .dark); expectNear(RoomLights.dim.ambient, 0.08)
     }
     check("a missing or silly source aspect falls back to 16:9") {
-        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: nil).screenHeight, 4.5)
-        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: 0).screenHeight, 4.5)
+        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: nil).screenHeight, 3.375)
+        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: 0).screenHeight, 3.375)
     }
 }
 

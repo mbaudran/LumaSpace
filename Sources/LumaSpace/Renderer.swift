@@ -27,13 +27,13 @@ extension Quat {
     }
 }
 
-private func perspective(fovY: Float, aspect: Float, near: Float, far: Float) -> simd_float4x4 {
+func perspective(fovY: Float, aspect: Float, near: Float, far: Float) -> simd_float4x4 {
     let ys = 1 / tan(fovY / 2), xs = ys / aspect, zs = far / (near - far)
     return simd_float4x4(columns: (SIMD4(xs, 0, 0, 0), SIMD4(0, ys, 0, 0),
                                    SIMD4(0, 0, zs, -1), SIMD4(0, 0, zs * near, 0)))
 }
 
-private func translation(_ v: Vec3) -> simd_float4x4 {
+func translation(_ v: Vec3) -> simd_float4x4 {
     var m = matrix_identity_float4x4
     m.columns.3 = SIMD4(Float(v.x), Float(v.y), Float(v.z), 1)
     return m
@@ -54,6 +54,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     var onFrame: ((MTLTexture, MTLCommandBuffer) -> Void)?
     /// A small ring at the centre of view while grabbing (⌃⌥ held).
     var showReticle = false
+    /// While set, the frame is the stereo cinema instead of the panels.
+    var cinema: CinemaRenderer?
     private var labelCache: [String: MTLTexture] = [:]
     private lazy var reticle: MTLTexture? = makeReticle()
 
@@ -94,10 +96,23 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
+        // The cinema needs a depth buffer; the panels' pipeline is built without one.
+        let depth: MTLPixelFormat = cinema == nil ? .invalid : .depth32Float
+        if view.depthStencilPixelFormat != depth { view.depthStencilPixelFormat = depth }
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
-              let cmd = queue.makeCommandBuffer(),
-              let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
-        let size = view.drawableSize
+              let cmd = queue.makeCommandBuffer() else { return }
+        if let cinema {
+            cinema.encode(into: pass, drawableSize: view.drawableSize, head: headOrientation(), commandBuffer: cmd)
+        } else {
+            drawPanels(pass: pass, size: view.drawableSize, cmd: cmd)
+        }
+        onFrame?(drawable.texture, cmd)
+        cmd.present(drawable)
+        cmd.commit()
+    }
+
+    private func drawPanels(pass: MTLRenderPassDescriptor, size: CGSize, cmd: MTLCommandBuffer) {
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
         let vp = viewProjection(aspect: size.height > 0 ? Double(size.width / size.height) : 16.0 / 9)
         enc.setRenderPipelineState(pipeline)
         for p in scene.panels.sorted(by: { $0.distance > $1.distance }) {
@@ -123,9 +138,6 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         }
         enc.endEncoding()
-        onFrame?(drawable.texture, cmd)
-        cmd.present(drawable)
-        cmd.commit()
     }
 
     private func makeReticle() -> MTLTexture? {
