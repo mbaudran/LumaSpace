@@ -96,9 +96,6 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
-        // The cinema needs a depth buffer; the panels' pipeline is built without one.
-        let depth: MTLPixelFormat = cinema == nil ? .invalid : .depth32Float
-        if view.depthStencilPixelFormat != depth { view.depthStencilPixelFormat = depth }
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
               let cmd = queue.makeCommandBuffer() else { return }
         if let cinema {

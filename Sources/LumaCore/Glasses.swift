@@ -38,6 +38,9 @@ public protocol GlassesLink: AnyObject {
     /// On: switch to a 3D side-by-side mode; returns whether the glasses accepted one.
     /// Off: back to 2D at `rate`.
     func setStereo(_ on: Bool, rate: DisplayRate) -> Bool
+    /// Whether the electrochromic lenses are darkened; nil when the glasses can't tell.
+    func lensTint() -> Bool?
+    func setLensTint(_ on: Bool)
     var onEvent: ((GlassesEvent) -> Void)? { get set }
     func stop()
 }

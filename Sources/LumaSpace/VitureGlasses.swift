@@ -38,6 +38,9 @@ final class VitureLibrary: @unchecked Sendable {
     fileprivate let valueMax: @convention(c) (Handle, Int32, UnsafeMutablePointer<Int32>?) -> Int32
     fileprivate let setDisplayMode: @convention(c) (Handle, Int32) -> Int32
     fileprivate let setLogLevel: @convention(c) (Int32) -> Void
+    /// Electrochromic lens tint; optional because older SDKs don't have it.
+    fileprivate let getFilm: (@convention(c) (Handle, UnsafeMutablePointer<Float>?) -> Int32)?
+    fileprivate let setFilm: (@convention(c) (Handle, Float) -> Int32)?
 
     /// Where "Set Up VITURE SDK…" installs the libraries.
     static let installDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -121,6 +124,8 @@ final class VitureLibrary: @unchecked Sendable {
         self.getBrightness = getBrightness; self.setBrightness = setBrightness
         self.getVolume = getVolume; self.setVolume = setVolume; self.valueMax = valueMax
         self.setDisplayMode = setDisplayMode; self.setLogLevel = setLogLevel
+        getFilm = dlsym(h, "xr_device_provider_get_film_mode").map { unsafeBitCast($0, to: (@convention(c) (Handle, UnsafeMutablePointer<Float>?) -> Int32).self) }
+        setFilm = dlsym(h, "xr_device_provider_set_film_mode").map { unsafeBitCast($0, to: (@convention(c) (Handle, Float) -> Int32).self) }
         setLogLevel(1)  // errors only
     }
 
@@ -278,6 +283,18 @@ final class VitureGlasses: GlassesLink {
             NSLog("LumaSpace: 3D display mode 0x\(String(mode, radix: 16)) rejected (\(rc))")
         }
         return false
+    }
+
+    func lensTint() -> Bool? {
+        guard let h = handle, let getFilm = lib.getFilm else { return nil }
+        var voltage: Float = 0
+        return getFilm(h, &voltage) == vitureSuccess ? voltage > 0 : nil
+    }
+
+    func setLensTint(_ on: Bool) {
+        guard let h = handle, let setFilm = lib.setFilm else { return }
+        let rc = setFilm(h, on ? 1 : 0)
+        if rc != vitureSuccess { NSLog("LumaSpace: set lens tint failed (\(rc))") }
     }
 
     func stop() { teardown() }

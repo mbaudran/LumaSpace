@@ -47,6 +47,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var cinemaSourceAvailable = true
     private let cinemaPanelID = UUID()
     private var rateBeforeCinema: DisplayRate?
+    /// The lens tint before the cinema darkened it; nil when the glasses can't tell.
+    private var tintBeforeCinema: Bool?
     /// Display mode switches make the glasses display blink; screen changes are ignored until then.
     private var ignoreScreenChangesUntil: Double?
     /// Called after any command so menus can refresh their checkmarks and sliders.
@@ -125,10 +127,16 @@ final class AppController: NSObject, NSApplicationDelegate {
             (glasses as? SimulatedGlasses)?.pitch = pitch * .pi / 180
         }
         Snapshot.installIfRequested(renderer: renderer, view: view)
-        // `LUMA_CINEMA=test`: the cinema with colour bars on the screen, for checking it without glasses.
-        if ProcessInfo.processInfo.environment["LUMA_CINEMA"] == "test",
-           let bars = CinemaRenderer.testPattern(device: renderer.device) {
+        // `LUMA_CINEMA=test`: the cinema with colour bars on the screen, for checking it without glasses;
+        // `clip` animates them (scrolling, a moving sun, a flash every 3 s).
+        let cinemaTest = ProcessInfo.processInfo.environment["LUMA_CINEMA"]
+        if cinemaTest == "test" || cinemaTest == "clip", let bars = CinemaRenderer.testPattern(device: renderer.device) {
             startCinema(source: nil, testPattern: bars)
+            renderer.cinema?.testClip = cinemaTest == "clip"
+        }
+        // `LUMA_AMBIENCE=off|soft|full` overrides the ambience for this run without saving it.
+        if let a = ProcessInfo.processInfo.environment["LUMA_AMBIENCE"].flatMap(Ambience.init(rawValue:)) {
+            renderer.cinema?.settings.ambience = a
         }
         Demo.runIfRequested(self)
         palette.run = { [unowned self] c in self.perform(c) }
@@ -248,9 +256,9 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// The single place commands run — menu, palette, shortcuts and keys all come here.
     func perform(_ c: Command) {
-        // In the cinema, Closer/Farther and Bigger/Smaller move seats and size the screen;
-        // eye distance and room lights can be set any time.
-        let anyMode = switch c { case .nudgeIPD, .cycleRoomLights: true; default: false }
+        // In the cinema, Closer/Farther and Bigger/Smaller set the distance and size of the screen;
+        // eye distance and ambience can be set any time.
+        let anyMode = switch c { case .nudgeIPD, .cycleAmbience: true; default: false }
         if mode == .cinema || anyMode, let s = cinemaAdjusted(cinema, by: c) {
             cinema = s
             renderer.cinema?.settings = s
@@ -281,7 +289,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             if let id = scene.selectedID { scene.remove(id); capture.sync(panels: capturedPanels); syncVirtualScreens() }
         case .groupAll: scene.group(scene.panels.map(\.id))
         case .ungroupSelected: if let id = scene.selectedID { scene.ungroup(id) }
-        case .nudgeIPD, .cycleRoomLights: break  // handled above
+        case .nudgeIPD, .cycleAmbience: break  // handled above
         case .quit: NSApp.terminate(nil)
         }
         markDirty()
@@ -335,6 +343,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         if !glasses.setStereo(true, rate: .hz90) {
             NSLog("LumaSpace: cinema: glasses refused 3D mode; showing side by side in 2D")
         }
+        tintBeforeCinema = glasses.lensTint()
+        if tintBeforeCinema != nil { glasses.setLensTint(true) }
+        NSLog("LumaSpace: cinema: lens tint \(tintBeforeCinema.map { $0 ? "already on" : "turned on" } ?? "not available")")
         c.settings = cinema
         if let source {
             c.screenTexture = { [unowned self] in source.key.flatMap { self.capture.texture(for: $0) } }
@@ -364,6 +375,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         cinemaSource = nil
         ignoreScreenChanges()
         _ = glasses.setStereo(false, rate: rateBeforeCinema ?? .hz60)
+        if let t = tintBeforeCinema { glasses.setLensTint(t) }
+        tintBeforeCinema = nil
         setPreviewAspect(width: 16, height: 9)
         NSLog("LumaSpace: cinema mode off")
         Task { await refreshSources() }

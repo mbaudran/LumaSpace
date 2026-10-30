@@ -27,5 +27,16 @@ public final class SimulatedGlasses: GlassesLink {
         stereo = on
         return true
     }
+    /// nil simulates glasses without a lens tint.
+    public var tint: Bool? = false
+    public private(set) var tintCalls: [Bool] = []
+
+    public func lensTint() -> Bool? { tint }
+
+    public func setLensTint(_ on: Bool) {
+        tintCalls.append(on)
+        if tint != nil { tint = on }
+    }
+
     public func stop() {}
 }

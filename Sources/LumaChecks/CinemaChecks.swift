@@ -44,25 +44,28 @@ func cinemaSceneChecks() {
         let l = cinemaLayout(CinemaSettings(), sourceAspect: 16.0 / 9)
         expectNear(l.viewer.z - l.screenCenter.z, 10); expectNear(l.screenCenter.x, 0); expectNear(l.screenWidth, 6)
     }
-    check("closer rows are nearer the screen") {
-        var s = CinemaSettings(); s.row = 0
-        let front = cinemaLayout(s, sourceAspect: nil); s.row = 6
-        expect(cinemaLayout(s, sourceAspect: nil).viewer.z - front.viewer.z > 5)
-    }
-    check("screen, viewer and every seat are inside the room; seats stay below the eyes") {
-        let l = cinemaLayout(CinemaSettings(), sourceAspect: 2.39)
-        func inside(_ p: Vec3) -> Bool {
-            abs(p.x - l.room.center.x) <= l.room.size.x / 2 && abs(p.y - l.room.center.y) <= l.room.size.y / 2
-                && abs(p.z - l.room.center.z) <= l.room.size.z / 2
+    check("rows step the screen from 7 to 13 m away") {
+        func distance(_ row: Int) -> Double {
+            let l = cinemaLayout(CinemaSettings(row: row), sourceAspect: nil)
+            return l.viewer.z - l.screenCenter.z
         }
-        expect(inside(l.screenCenter)); expect(inside(l.viewer)); expectEqual(l.seats.count, 84)
-        // A seat's top stays below the eye height of someone sitting in that row.
-        expect(l.seats.allSatisfy { inside($0.center) && $0.center.y + $0.size.y / 2 < 0.15 * ($0.center.z - 0.25) + 1.15 })
+        expectNear(distance(0), 7); expectNear(distance(6), 13); expectNear(distance(-3), 7)
     }
-    check("settings clamp and lights cycle") {
-        let c = CinemaSettings(row: 12, screenScale: .nan, lights: .lit, ipd: 0.2).clamped
-        expectEqual(c.row, 6); expectNear(c.screenScale, 1); expectNear(c.ipd, 0.075)
-        expectEqual(RoomLights.lit.next, .dark); expectNear(RoomLights.dim.ambient, 0.08)
+    check("the screen sits near eye height and the floor below it, at any size") {
+        for scale in [0.6, 1, 1.6] {
+            for aspect in [0.9, 16.0 / 9, 2.39] {
+                let l = cinemaLayout(CinemaSettings(screenScale: scale), sourceAspect: aspect)
+                expect(abs(l.screenCenter.y - l.viewer.y) < 0.5)
+                expect(l.floorY < l.screenBottom && l.floorY < l.viewer.y - 1)
+                // The viewer is inside the screen's curve, so it bends towards them.
+                expect(l.screenAxisZ - l.viewer.z < l.screenRadius)
+            }
+        }
+    }
+    check("settings clamp and ambience cycles") {
+        let c = CinemaSettings(row: 12, screenScale: .nan, ambience: .full, ipd: 0.2).clamped
+        expectEqual(c.row, 6); expectNear(c.screenScale, 1); expectNear(c.ipd, 0.075); expectEqual(c.ambience, .full)
+        expectEqual(Ambience.off.next, .soft); expectEqual(Ambience.soft.next, .full); expectEqual(Ambience.full.next, .off)
     }
     check("a missing or silly source aspect falls back to 16:9") {
         expectNear(cinemaLayout(CinemaSettings(), sourceAspect: nil).screenHeight, 3.375)
@@ -76,13 +79,13 @@ func cinemaCommandChecks() {
         expect(paletteMatches("movie", in: Command.all).contains(.toggleCinemaMode))
         expect(paletteMatches("vr", in: Command.all).contains(.toggleCinemaMode))
     }
-    check("closer/farther pick rows, bigger/smaller scale the screen") {
+    check("closer/farther step the distance, bigger/smaller scale the screen") {
         let s = CinemaSettings()
         expectEqual(cinemaAdjusted(s, by: .nudgeDistance(-0.25))?.row, 2)
         expectEqual(cinemaAdjusted(s, by: .nudgeDistance(0.25))?.row, 4)
         expectNear(cinemaAdjusted(s, by: .resizeSelected(1.1))!.screenScale, 1.1)
         expectNear(cinemaAdjusted(s, by: .nudgeIPD(0.001))!.ipd, 0.064)
-        expectEqual(cinemaAdjusted(s, by: .cycleRoomLights)?.lights, .lit)
+        expectEqual(cinemaAdjusted(s, by: .cycleAmbience)?.ambience, .full)
         expectEqual(cinemaAdjusted(s, by: .recenter), nil)
     }
     check("cinema and game mode exclude each other; toggling again returns to panels") {
@@ -102,9 +105,9 @@ func cinemaCommandChecks() {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("luma-cinema-\(UUID()).json")
         let store = LayoutStore(url: url)
         try store.save(LayoutFile(panels: [], distance: 2, smoothFollow: false, lockedAxes: [],
-                                  cinema: CinemaSettings(row: 9, screenScale: 1.2, lights: .lit, ipd: 0.06)))
+                                  cinema: CinemaSettings(row: 9, screenScale: 1.2, ambience: .full, ipd: 0.06)))
         let c = store.load().cinema
-        expectEqual(c?.row, 6); expectEqual(c?.lights, .lit); expectNear(c?.ipd ?? 0, 0.06)
+        expectEqual(c?.row, 6); expectEqual(c?.ambience, .full); expectNear(c?.ipd ?? 0, 0.06)
     }
 }
 
@@ -139,9 +142,5 @@ func cinemaReviewFixChecks() {
         expectNear(square.screenHeight, 3.375); expectNear(square.screenWidth, 3.375 * 0.9)
         let wide = cinemaLayout(CinemaSettings(), sourceAspect: 2.39)
         expectNear(wide.screenWidth, 6); expectNear(wide.screenHeight, 6 / 2.39)
-    }
-    check("risers stop short of the side walls (no flicker where they'd overlap)") {
-        let l = cinemaLayout(CinemaSettings(), sourceAspect: nil)
-        expect(l.risers.allSatisfy { $0.size.x < l.room.size.x })
     }
 }

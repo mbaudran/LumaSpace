@@ -40,6 +40,11 @@ if CommandLine.arguments.contains("--diagnose") || CommandLine.arguments.contain
     exit(0)
 }
 
+// `LumaSpace --cinema-bench` measures how long the cinema takes to draw at the glasses' size.
+if CommandLine.arguments.contains("--cinema-bench") {
+    exit(MainActor.assumeIsolated { CinemaBench.run() })
+}
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let controller = AppController()

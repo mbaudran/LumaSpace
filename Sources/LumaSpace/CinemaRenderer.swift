@@ -1,9 +1,13 @@
 import AppKit
 import LumaCore
 import Metal
+import os
+import QuartzCore
 import simd
 
-/// Draws the theater in side-by-side stereo: each eye into its half of the drawable.
+/// Draws the cinema in side-by-side stereo: the screen floating in the dark, its light spilling
+/// into a halo, haze, dust and a glossy floor. Each frame: picture → glow texture, scene pass (4×
+/// MSAA, both eyes), bloom, composite onto the drawable.
 @MainActor
 final class CinemaRenderer {
     let device: MTLDevice
@@ -11,173 +15,338 @@ final class CinemaRenderer {
     var screenTexture: () -> MTLTexture? = { nil }
     /// Shown on the screen when the source is gone (the "Source unavailable" card).
     var fallbackTexture: () -> MTLTexture? = { nil }
+    /// `LUMA_CINEMA=clip`: an animated test picture instead of `screenTexture`.
+    var testClip = false
 
-    private let room: MTLRenderPipelineState
-    private let screen: MTLRenderPipelineState
-    private let downsample: MTLRenderPipelineState
-    private let depth: MTLDepthStencilState
-    private let lightTexture: MTLTexture
+    private enum Blend { case opaque, additive, alpha }
+
+    private let floorPipeline, haloPipeline, screenPipeline, dustPipeline: MTLRenderPipelineState
+    private let glowPipeline, lightsPipeline, hazePipeline, bloomExtract, blurPipeline: MTLRenderPipelineState
+    private let compositePipeline, clipPipeline: MTLRenderPipelineState
+    private let depthWrite, depthTest: MTLDepthStencilState
+    /// Ping-pong pair: each frame blends the picture into the other one (the smoothing).
+    private let glow: [MTLTexture]
+    private var glowIndex = 0
+    private var glowCleared = false
+    /// The colours of the 16 screen lights, worked out once per frame from the glow.
+    private let lightColors: MTLTexture
+    private var clipTexture: MTLTexture?
+
+    private var targetSize = (width: 0, height: 0)
+    private var sceneMSAA, sceneDepth, sceneResolved, bloomA, bloomB, haze: MTLTexture?
+
     private var layout: CinemaLayout?
     private var layoutAspect: Double?
-    private var roomBuffer: MTLBuffer?
-    private var roomVertexCount = 0
-    private var screenBuffer: MTLBuffer?
-    private var lights: [(pos: SIMD4<Float>, normal: SIMD4<Float>)] = []
+    private var lights: [CinemaLight] = []
+    private var dust = CinemaBox(center: .zero, size: Vec3(x: 1, y: 1, z: 1))
+    private var floorBuffer, haloBuffer, screenBuffer: MTLBuffer?
+
+    private let start = CACurrentMediaTime()
+    private var lastFrame: Double?
+    private let stats = ProcessInfo.processInfo.environment["LUMA_CINEMA_STATS"] == "1" ? GPUStats() : nil
 
     static let screenSegments = 64
-    static let lightGain: Float = 14, lightFalloff: Float = 0.04
-    static let seatColor = Vec3(x: 0.45, y: 0.06, z: 0.08)
+    static let haloMargin = 2.5, haloGap = 0.4
+    static let glowWidth = 256, glowHeight = 144
+    static let sceneFormat = MTLPixelFormat.rgba16Float, samples = 4
 
     init?(device: MTLDevice, colorPixelFormat: MTLPixelFormat) {
         self.device = device
         do {
             let lib = try device.makeLibrary(source: cinemaShaderSource, options: nil)
-            func pipeline(_ v: String, _ f: String, format: MTLPixelFormat, depth: Bool) throws -> MTLRenderPipelineState {
+            func pipeline(_ v: String, _ f: String, format: MTLPixelFormat = Self.sceneFormat, scene: Bool = false,
+                          blend: Blend = .opaque) throws -> MTLRenderPipelineState {
                 let d = MTLRenderPipelineDescriptor()
                 d.vertexFunction = lib.makeFunction(name: v)
                 d.fragmentFunction = lib.makeFunction(name: f)
-                d.colorAttachments[0].pixelFormat = format
-                if depth { d.depthAttachmentPixelFormat = .depth32Float }
+                let ca = d.colorAttachments[0]!
+                ca.pixelFormat = format
+                if scene {
+                    d.rasterSampleCount = Self.samples
+                    d.depthAttachmentPixelFormat = .depth32Float
+                }
+                switch blend {
+                case .opaque: break
+                case .additive:
+                    ca.isBlendingEnabled = true
+                    ca.sourceRGBBlendFactor = .one; ca.destinationRGBBlendFactor = .one
+                    ca.sourceAlphaBlendFactor = .zero; ca.destinationAlphaBlendFactor = .one
+                case .alpha:
+                    ca.isBlendingEnabled = true
+                    ca.sourceRGBBlendFactor = .sourceAlpha; ca.destinationRGBBlendFactor = .oneMinusSourceAlpha
+                    ca.sourceAlphaBlendFactor = .one; ca.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+                }
                 return try device.makeRenderPipelineState(descriptor: d)
             }
-            room = try pipeline("roomVertex", "roomFragment", format: colorPixelFormat, depth: true)
-            screen = try pipeline("screenVertex", "screenFragment", format: colorPixelFormat, depth: true)
-            downsample = try pipeline("fullscreenVertex", "downsampleFragment", format: .rgba8Unorm, depth: false)
+            floorPipeline = try pipeline("sceneVertex", "floorFragment", scene: true)
+            haloPipeline = try pipeline("sceneVertex", "haloFragment", scene: true, blend: .additive)
+            screenPipeline = try pipeline("sceneVertex", "screenFragment", scene: true, blend: .alpha)
+            dustPipeline = try pipeline("dustVertex", "dustFragment", scene: true, blend: .additive)
+            glowPipeline = try pipeline("fullscreenVertex", "glowFragment")
+            lightsPipeline = try pipeline("fullscreenVertex", "lightsFragment")
+            hazePipeline = try pipeline("fullscreenVertex", "hazeFragment")
+            bloomExtract = try pipeline("fullscreenVertex", "bloomExtractFragment")
+            blurPipeline = try pipeline("fullscreenVertex", "blurFragment")
+            compositePipeline = try pipeline("fullscreenVertex", "compositeFragment", format: colorPixelFormat)
+            clipPipeline = try pipeline("fullscreenVertex", "clipFragment", format: .bgra8Unorm)
         } catch {
             NSLog("LumaSpace: cinema shader setup failed: \(error)")
             return nil
         }
-        let ds = MTLDepthStencilDescriptor()
-        ds.depthCompareFunction = .less
-        ds.isDepthWriteEnabled = true
-        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: 64, height: 32, mipmapped: true)
+        func depthState(_ compare: MTLCompareFunction, write: Bool) -> MTLDepthStencilState? {
+            let d = MTLDepthStencilDescriptor()
+            d.depthCompareFunction = compare
+            d.isDepthWriteEnabled = write
+            return device.makeDepthStencilState(descriptor: d)
+        }
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.sceneFormat, width: Self.glowWidth,
+                                                          height: Self.glowHeight, mipmapped: true)
         td.usage = [.renderTarget, .shaderRead]
         td.storageMode = .private
-        guard let depth = device.makeDepthStencilState(descriptor: ds),
-              let light = device.makeTexture(descriptor: td) else { return nil }
-        self.depth = depth
-        lightTexture = light
+        let ld = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.sceneFormat, width: cinemaLightColumns * cinemaLightRows,
+                                                          height: 1, mipmapped: false)
+        ld.usage = [.renderTarget, .shaderRead]
+        ld.storageMode = .private
+        guard let w = depthState(.less, write: true), let t = depthState(.less, write: false),
+              let g0 = device.makeTexture(descriptor: td), let g1 = device.makeTexture(descriptor: td),
+              let lc = device.makeTexture(descriptor: ld) else { return nil }
+        depthWrite = w; depthTest = t
+        glow = [g0, g1]
+        lightColors = lc
     }
 
     func encode(into pass: MTLRenderPassDescriptor, drawableSize: CGSize, head: Quat, commandBuffer cmd: MTLCommandBuffer) {
-        let tex = screenTexture() ?? fallbackTexture()
+        let now = CACurrentMediaTime(), elapsed = now - start
+        let dt = lastFrame.map { now - $0 } ?? 0
+        lastFrame = now
+        if testClip { renderClip(time: elapsed, cmd: cmd) }
+        let tex = testClip ? clipTexture : screenTexture() ?? fallbackTexture()
         let aspect = tex.map { Double($0.width) / Double(max($0.height, 1)) }
         if layout == nil || layoutAspect != aspect { rebuild(aspect: aspect) }
-        guard let layout, let roomBuffer, let screenBuffer else { return }
-        if let tex { updateLight(from: tex, cmd: cmd) }
-
-        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
-        enc.setDepthStencilState(depth)
         let w = Int(drawableSize.width), h = Int(drawableSize.height)
-        let proj = perspective(fovY: Float(verticalFOV(aspect: eyeAspect(drawableWidth: w, drawableHeight: h))),
-                               aspect: Float(eyeAspect(drawableWidth: w, drawableHeight: h)), near: 0.05, far: 50)
-        for eye in Eye.allCases {
+        guard w > 1, h > 0, makeTargets(width: w, height: h), let layout, let floorBuffer, let haloBuffer, let screenBuffer,
+              let sceneMSAA, let sceneDepth, let sceneResolved, let bloomA, let bloomB, let haze else { return }
+        if !glowCleared { clearGlow(cmd: cmd) }
+        if let tex { updateGlow(from: tex, blend: glowBlend(dt: dt), cmd: cmd) }
+        let glowTex = glow[glowIndex]
+        let strength = settings.ambience.strength
+        let fade = cinemaFade(elapsed: elapsed)
+        let ea = eyeAspect(drawableWidth: w, drawableHeight: h)
+        let proj = perspective(fovY: Float(verticalFOV(aspect: ea)), aspect: Float(ea), near: 0.05, far: 100)
+        let eyes = Eye.allCases.map { eye in
             let vp = eyeViewport(eye, drawableWidth: w, drawableHeight: h)
-            guard vp.width > 0, vp.height > 0 else { continue }
+            let pos = layout.viewer + eyeOffset(eye, head: head, ipd: settings.ipd)
+            return (viewport: vp, uniforms: uniforms(viewProj: proj * head.conjugate.matrix * translation(pos * -1), eye: pos,
+                                                     time: elapsed, fade: fade, dustPixels: Float(vp.height) / 2 * proj.columns.1.y))
+        }
+        var u = eyes[0].uniforms
+        fullscreen(lightsPipeline, into: lightColors, textures: [glowTex], bytes: u, cmd: cmd)
+
+        let sp = MTLRenderPassDescriptor()
+        sp.colorAttachments[0].texture = sceneMSAA
+        sp.colorAttachments[0].resolveTexture = sceneResolved
+        sp.colorAttachments[0].loadAction = .clear
+        sp.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        sp.colorAttachments[0].storeAction = .multisampleResolve
+        sp.depthAttachment.texture = sceneDepth
+        sp.depthAttachment.loadAction = .clear
+        sp.depthAttachment.clearDepth = 1
+        sp.depthAttachment.storeAction = .dontCare
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: sp) else { return }
+        for (vp, eu) in eyes where vp.width > 0 && vp.height > 0 {
+            u = eu
             enc.setViewport(MTLViewport(originX: Double(vp.x), originY: 0, width: Double(vp.width), height: Double(vp.height),
                                         znear: 0, zfar: 1))
             enc.setScissorRect(MTLScissorRect(x: vp.x, y: 0, width: vp.width, height: vp.height))
-            let eyePos = layout.viewer + eyeOffset(eye, head: head, ipd: settings.ipd)
-            var u = uniforms(viewProj: proj * head.conjugate.matrix * translation(eyePos * -1))
             let length = u.count * MemoryLayout<Float>.stride
-
-            enc.setRenderPipelineState(room)
-            enc.setVertexBuffer(roomBuffer, offset: 0, index: 0)
-            enc.setVertexBytes(&u, length: length, index: 1)
-            enc.setFragmentBytes(&u, length: length, index: 0)
-            enc.setFragmentTexture(lightTexture, index: 0)
-            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: roomVertexCount)
-
-            if let tex {
-                enc.setRenderPipelineState(screen)
-                enc.setVertexBuffer(screenBuffer, offset: 0, index: 0)
-                enc.setVertexBytes(&u, length: length, index: 1)
-                enc.setFragmentTexture(tex, index: 0)
-                enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: (Self.screenSegments + 1) * 2)
+            func draw(_ p: MTLRenderPipelineState, _ depth: MTLDepthStencilState, _ buffer: MTLBuffer?,
+                      _ textures: [MTLTexture], _ type: MTLPrimitiveType, _ count: Int) {
+                enc.setRenderPipelineState(p)
+                enc.setDepthStencilState(depth)
+                enc.setVertexBuffer(buffer, offset: 0, index: 0)
+                enc.setVertexBytes(&u, length: length, index: buffer == nil ? 0 : 1)
+                enc.setVertexTexture(textures[0], index: 0)
+                enc.setFragmentBytes(&u, length: length, index: 0)
+                for (i, t) in textures.enumerated() { enc.setFragmentTexture(t, index: i) }
+                enc.drawPrimitives(type: type, vertexStart: 0, vertexCount: count)
             }
+            let strip = (Self.screenSegments + 1) * 2
+            draw(floorPipeline, depthWrite, floorBuffer, [glowTex, lightColors], .triangle, 6)
+            if strength.halo > 0 { draw(haloPipeline, depthTest, haloBuffer, [glowTex], .triangleStrip, strip) }
+            if let tex { draw(screenPipeline, depthWrite, screenBuffer, [tex], .triangleStrip, strip) }
+            if strength.dust > 0 { draw(dustPipeline, depthTest, nil, [lightColors], .point, dustCount) }
         }
         enc.endEncoding()
+
+        // The haze is smooth, so it's drawn at a quarter of the size and added when compositing.
+        if strength.haze > 0 {
+            let hp = MTLRenderPassDescriptor()
+            hp.colorAttachments[0].texture = haze
+            hp.colorAttachments[0].loadAction = .dontCare
+            hp.colorAttachments[0].storeAction = .store
+            guard let he = cmd.makeRenderCommandEncoder(descriptor: hp) else { return }
+            he.setRenderPipelineState(hazePipeline)
+            he.setFragmentTexture(lightColors, index: 0)
+            for (eye, (_, eu)) in zip(Eye.allCases, eyes) {
+                let vp = eyeViewport(eye, drawableWidth: haze.width, drawableHeight: haze.height)
+                he.setViewport(MTLViewport(originX: Double(vp.x), originY: 0, width: Double(vp.width), height: Double(vp.height),
+                                           znear: 0, zfar: 1))
+                var b = eu
+                he.setFragmentBytes(&b, length: b.count * MemoryLayout<Float>.stride, index: 0)
+                he.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            }
+            he.endEncoding()
+        }
+
+        if strength.bloom > 0 {
+            fullscreen(bloomExtract, into: bloomA, textures: [sceneResolved], cmd: cmd)
+            for _ in 0..<2 {
+                fullscreen(blurPipeline, into: bloomB, textures: [bloomA], bytes: [1, 0], cmd: cmd)
+                fullscreen(blurPipeline, into: bloomA, textures: [bloomB], bytes: [0, 1], cmd: cmd)
+            }
+        }
+        guard let out = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        out.setRenderPipelineState(compositePipeline)
+        out.setFragmentTexture(sceneResolved, index: 0)
+        // With bloom or haze off their textures aren't written this frame; the scene stands in, weighted by 0.
+        out.setFragmentTexture(strength.bloom > 0 ? bloomA : sceneResolved, index: 1)
+        out.setFragmentTexture(strength.haze > 0 ? haze : sceneResolved, index: 2)
+        out.setFragmentBytes(&u, length: u.count * MemoryLayout<Float>.stride, index: 0)
+        out.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        out.endEncoding()
+        if let stats { cmd.addCompletedHandler { cb in stats.record(cb.gpuEndTime - cb.gpuStartTime) } }
     }
 
-    private func uniforms(viewProj m: simd_float4x4) -> [Float] {
+    private func uniforms(viewProj m: simd_float4x4, eye: Vec3, time: Double, fade: Double, dustPixels: Float) -> [Float] {
+        guard let l = layout else { return [] }
+        let s = settings.ambience.strength
         var u: [Float] = []
-        for c in [m.columns.0, m.columns.1, m.columns.2, m.columns.3] { u += [c.x, c.y, c.z, c.w] }
-        for l in lights { u += [l.pos.x, l.pos.y, l.pos.z, l.pos.w] }
-        for l in lights { u += [l.normal.x, l.normal.y, l.normal.z, l.normal.w] }
-        return u + [Float(settings.lights.ambient), Self.lightGain, Self.lightFalloff, 0]
+        for c in [m, m.inverse] { for v in [c.columns.0, c.columns.1, c.columns.2, c.columns.3] { u += [v.x, v.y, v.z, v.w] } }
+        let dustMin = dust.center - dust.size * 0.5
+        u += [eye.x, eye.y, eye.z, time,
+              l.screenAxisZ, l.screenRadius, l.screenHalfAngle, l.screenHeight * 0.035,
+              l.screenTop, l.screenHeight, l.screenWidth, l.floorY,
+              s.halo, s.haze, s.reflection, s.dust,
+              s.bloom, fade, Double(dustPixels), 0,
+              dustMin.x, dustMin.y, dustMin.z, 0,
+              dust.size.x, dust.size.y, dust.size.z, 0].map { Float($0) }
+        for li in lights { u += [li.position.x, li.position.y, li.position.z, li.u].map { Float($0) } }
+        for li in lights { u += [li.normal.x, li.normal.y, li.normal.z, li.v].map { Float($0) } }
+        return u
     }
 
-    /// Box-filters the picture into the 64×32 light texture and builds its mipmaps.
-    private func updateLight(from tex: MTLTexture, cmd: MTLCommandBuffer) {
+    /// (Re)creates the off-screen targets when the drawable changes size; false if Metal refused.
+    private func makeTargets(width w: Int, height h: Int) -> Bool {
+        if targetSize == (w, h), sceneMSAA != nil { return true }
+        func texture(_ format: MTLPixelFormat, _ w: Int, _ h: Int, msaa: Bool) -> MTLTexture? {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: w, height: h, mipmapped: false)
+            d.usage = msaa ? .renderTarget : [.renderTarget, .shaderRead]
+            if msaa {
+                d.textureType = .type2DMultisample
+                d.sampleCount = Self.samples
+                // Apple GPUs keep MSAA samples in tile memory; nothing goes to RAM but the resolve.
+                d.storageMode = device.supportsFamily(.apple1) ? .memoryless : .private
+            } else {
+                d.storageMode = .private
+            }
+            return device.makeTexture(descriptor: d)
+        }
+        sceneMSAA = texture(Self.sceneFormat, w, h, msaa: true)
+        sceneDepth = texture(.depth32Float, w, h, msaa: true)
+        sceneResolved = texture(Self.sceneFormat, w, h, msaa: false)
+        bloomA = texture(Self.sceneFormat, max(w / 4, 2), max(h / 4, 1), msaa: false)
+        bloomB = texture(Self.sceneFormat, max(w / 4, 2), max(h / 4, 1), msaa: false)
+        haze = texture(Self.sceneFormat, max(w / 4, 2), max(h / 4, 1), msaa: false)
+        targetSize = (w, h)
+        return sceneMSAA != nil && sceneDepth != nil && sceneResolved != nil && bloomA != nil && bloomB != nil && haze != nil
+    }
+
+    private func fullscreen(_ p: MTLRenderPipelineState, into target: MTLTexture, textures: [MTLTexture],
+                            bytes: [Float] = [], cmd: MTLCommandBuffer) {
         let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = lightTexture
+        pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .dontCare
         pass.colorAttachments[0].storeAction = .store
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
-        enc.setRenderPipelineState(downsample)
-        enc.setFragmentTexture(tex, index: 0)
+        enc.setRenderPipelineState(p)
+        for (i, t) in textures.enumerated() { enc.setFragmentTexture(t, index: i) }
+        if !bytes.isEmpty {
+            var b = bytes
+            enc.setFragmentBytes(&b, length: b.count * MemoryLayout<Float>.stride, index: 0)
+        }
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         enc.endEncoding()
+    }
+
+    /// Blends the picture into the other glow texture and builds its mipmaps.
+    private func updateGlow(from tex: MTLTexture, blend: Double, cmd: MTLCommandBuffer) {
+        let prev = glow[glowIndex], next = glow[1 - glowIndex]
+        fullscreen(glowPipeline, into: next, textures: [tex, prev], bytes: [Float(blend)], cmd: cmd)
         guard let blit = cmd.makeBlitCommandEncoder() else { return }
-        blit.generateMipmaps(for: lightTexture)
+        blit.generateMipmaps(for: next)
         blit.endEncoding()
+        glowIndex = 1 - glowIndex
+    }
+
+    /// The glow textures start black, so the first frames fade up from darkness instead of garbage.
+    private func clearGlow(cmd: MTLCommandBuffer) {
+        for t in glow {
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = t
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            pass.colorAttachments[0].storeAction = .store
+            cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        }
+        glowCleared = true
+    }
+
+    private func renderClip(time: Double, cmd: MTLCommandBuffer) {
+        if clipTexture == nil {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1920, height: 1080, mipmapped: false)
+            d.usage = [.renderTarget, .shaderRead]
+            d.storageMode = .private
+            clipTexture = device.makeTexture(descriptor: d)
+        }
+        guard let clipTexture else { return }
+        fullscreen(clipPipeline, into: clipTexture, textures: [], bytes: [Float(time)], cmd: cmd)
     }
 
     private func rebuild(aspect: Double?) {
         let l = cinemaLayout(settings, sourceAspect: aspect)
         layout = l
         layoutAspect = aspect
+        lights = screenLights(l)
+        dust = dustBox(l)
 
-        var v: [Float] = []
-        func tri(_ ps: [Vec3], _ n: Vec3, _ albedo: Vec3) {
-            for p in ps { v += [p.x, p.y, p.z, n.x, n.y, n.z, albedo.x, albedo.y, albedo.z].map { Float($0) } }
+        // 6 floats per vertex: position, then two values the fragment shader reads as uv.
+        func buffer(_ v: [Double]) -> MTLBuffer? {
+            let f = v.map { Float($0) }
+            return device.makeBuffer(bytes: f, length: f.count * MemoryLayout<Float>.stride)
         }
-        func quad(_ c: Vec3, right: Vec3, up: Vec3, _ n: Vec3, _ albedo: Vec3) {
-            let a = c - right - up, b = c + right - up, d = c + right + up, e = c - right + up
-            tri([a, b, d, a, d, e], n, albedo)
-        }
-        func box(_ b: CinemaBox, _ albedo: Vec3) {
-            let hx = Vec3(x: b.size.x / 2, y: 0, z: 0), hy = Vec3(x: 0, y: b.size.y / 2, z: 0)
-            let hz = Vec3(x: 0, y: 0, z: b.size.z / 2)
-            for s in [1.0, -1.0] {
-                quad(b.center + hx * s, right: hz, up: hy, Vec3(x: s, y: 0, z: 0), albedo)
-                quad(b.center + hy * s, right: hx, up: hz, Vec3(x: 0, y: s, z: 0), albedo)
-                quad(b.center + hz * s, right: hx, up: hy, Vec3(x: 0, y: 0, z: s), albedo)
-            }
-        }
-        for s in l.surfaces {
-            quad(s.center, right: s.up.cross(s.normal) * (s.width / 2), up: s.up * (s.height / 2), s.normal, s.albedo)
-        }
-        for r in l.risers { box(r, l.surfaces[0].albedo) }
-        // Each seat box becomes a cushion (lower half) and a thin backrest at its back.
-        for seat in l.seats {
-            let bottom = seat.center.y - seat.size.y / 2
-            box(CinemaBox(center: Vec3(x: seat.center.x, y: bottom + seat.size.y / 4, z: seat.center.z),
-                          size: Vec3(x: seat.size.x, y: seat.size.y / 2, z: seat.size.z)), Self.seatColor)
-            box(CinemaBox(center: Vec3(x: seat.center.x, y: seat.center.y, z: seat.center.z + seat.size.z / 2 - 0.06),
-                          size: Vec3(x: seat.size.x, y: seat.size.y, z: 0.12)), Self.seatColor)
-        }
-        roomVertexCount = v.count / 9
-        roomBuffer = device.makeBuffer(bytes: v, length: v.count * MemoryLayout<Float>.stride)
+        let y = l.floorY
+        let corners = [(-60.0, 20.0), (60, 20), (60, -80), (-60, 20), (60, -80), (-60, -80)]
+        floorBuffer = buffer(corners.flatMap { [$0.0, y, $0.1, 0, 0, 0] })
 
-        // The screen curves around a vertical axis through the default seat row.
-        let axisZ = l.screenCenter.z + l.screenRadius, half = l.screenWidth / 2 / l.screenRadius
-        let bottom = l.screenCenter.y - l.screenHeight / 2, top = l.screenCenter.y + l.screenHeight / 2
-        var sv: [Float] = []
-        for i in 0...Self.screenSegments {
-            let t = Double(i) / Double(Self.screenSegments), a = -half + 2 * half * t
-            let x = l.screenRadius * sin(a), z = axisZ - l.screenRadius * cos(a)
-            sv += [x, bottom, z, t, 1, x, top, z, t, 0].map { Float($0) }
+        // The screen and the halo curve around the same axis; the halo sits a little behind.
+        var screen: [Double] = [], halo: [Double] = []
+        let n = Self.screenSegments, r = l.screenRadius, axis = l.screenAxisZ
+        let haloR = r + Self.haloGap, haloHalf = l.screenWidth / 2 + Self.haloMargin
+        let haloTop = l.screenTop + Self.haloMargin, haloBottom = max(l.floorY, l.screenBottom - Self.haloMargin)
+        for i in 0...n {
+            let t = Double(i) / Double(n)
+            let a = (t * 2 - 1) * l.screenHalfAngle
+            let x = r * sin(a), z = axis - r * cos(a)
+            screen += [x, l.screenTop, z, t, 0, 0, x, l.screenBottom, z, t, 1, 0]
+            let s = (t * 2 - 1) * haloHalf, ha = s / r  // arc metres measured on the screen
+            let hx = haloR * sin(ha), hz = axis - haloR * cos(ha)
+            halo += [hx, haloTop, hz, s, haloTop, 0, hx, haloBottom, hz, s, haloBottom, 0]
         }
-        screenBuffer = device.makeBuffer(bytes: sv, length: sv.count * MemoryLayout<Float>.stride)
-        lights = (0..<8).map { i in
-            let a = -half + 2 * half * (Double(i) + 0.5) / 8
-            return (SIMD4(Float(l.screenRadius * sin(a)), Float(l.screenCenter.y), Float(axisZ - l.screenRadius * cos(a)), 1),
-                    SIMD4(Float(-sin(a)), 0, Float(cos(a)), 0))
-        }
+        screenBuffer = buffer(screen)
+        haloBuffer = buffer(halo)
     }
 
-    /// SMPTE-style colour bars, for checking the theater without a capture source (`LUMA_CINEMA=test`).
+    /// SMPTE-style colour bars, for checking the cinema without a capture source (`LUMA_CINEMA=test`).
     static func testPattern(device: MTLDevice) -> MTLTexture? {
         let w = 1920, h = 1080
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
@@ -199,5 +368,23 @@ final class CinemaRenderer {
         guard let tex = device.makeTexture(descriptor: desc), let data = ctx.data else { return nil }
         tex.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: data, bytesPerRow: w * 4)
         return tex
+    }
+}
+
+/// `LUMA_CINEMA_STATS=1`: logs the mean GPU time of the cinema's frames once a second.
+final class GPUStats: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: (sum: 0.0, count: 0, since: CACurrentMediaTime()))
+
+    func record(_ seconds: Double) {
+        let now = CACurrentMediaTime()
+        let report: (Double, Int)? = state.withLock { s in
+            s.sum += seconds; s.count += 1
+            guard now - s.since >= 1 else { return nil }
+            defer { s = (0, 0, now) }
+            return (s.sum / Double(s.count), s.count)
+        }
+        if let (mean, frames) = report {
+            NSLog("LumaSpace: cinema GPU \(String(format: "%.2f", mean * 1000)) ms/frame over \(frames) frames")
+        }
     }
 }
