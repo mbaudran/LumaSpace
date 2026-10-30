@@ -268,6 +268,7 @@ Sources/
 scripts/checks.sh      # run the test suite (no XCTest or Xcode needed)
 scripts/bundle.sh      # build build/LumaSpace.app (add --install to copy it to /Applications)
 scripts/release.sh     # build build/LumaSpace-<version>.zip for a GitHub release (never includes the SDK)
+scripts/make-icon.sh   # redraw Resources/AppIcon.icns from scripts/make-icon.swift
 ```
 
 Debug environment variables:

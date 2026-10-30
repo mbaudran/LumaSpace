@@ -53,6 +53,7 @@ cp .build/release/LumaSpace "$app/Contents/MacOS/LumaSpace"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 mkdir -p "$app/Contents/Resources"
 cp -R Resources/Theater "$app/Contents/Resources/Theater"
+cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 if [ "$nosdk" = no ]; then
     # libcarina_vio ships next to libglasses (the SDK's own demo bundles both).
     for lib in vendor/viture-sdk/aarch64/*.dylib; do

@@ -8,6 +8,8 @@
     <string>LumaSpace</string>
     <key>CFBundleDisplayName</key>
     <string>LumaSpace</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>LumaSpace</string>
     <key>CFBundlePackageType</key>
