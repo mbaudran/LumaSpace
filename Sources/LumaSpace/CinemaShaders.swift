@@ -1,5 +1,7 @@
-// Compiled at runtime with MTLDevice.makeLibrary(source:), like shaderSource.
-// The geometry helpers mirror LumaCore/CinemaAmbience.swift, where they are checked.
+// Compiled at runtime with MTLDevice.makeLibrary(source:), like shaderSource, together with
+// theaterShaderSource. The geometry helpers mirror LumaCore/CinemaAmbience.swift, where they are
+// checked. Colours are linear from the glow texture to the composite, which encodes them for the
+// display; the captured picture is display-encoded and is decoded where it's read.
 let cinemaShaderSource = """
 #include <metal_stdlib>
 using namespace metal;
@@ -17,20 +19,28 @@ struct CinemaUniforms {
     float4 dustSize;
     float4 lightPos[16];    // w = u
     float4 lightNormal[16]; // w = v
+    float4 room0;           // the space rays travel in: min corner, w = environment (0 void, 1 theater)
+    float4 room1;           // max corner, w = house light level
+    float4 floorPlane;      // normal, w = offset (normal · p = offset)
+    float4 beam;            // projector position, w = beam strength
+    float4x4 shadowViewProj;
 };
 
 constant float hazeSoftening = 0.25;  // hazeSoftening in CinemaAmbience.swift
-constant float hazeGain = 0.22;
-constant float poolGain = 0.05;
-constant float haloGain = 0.8;
-constant float dustGain = 5.0;
-constant float reflectionGain = 1.3;
+constant float hazeGain = 0.05;
+constant float poolGain = 0.02;
+constant float haloGain = 0.3;
+constant float dustGain = 2.5;
+constant float reflectionGain = 0.6;
 constant float bloomGain = 0.7;
+constant float beamGain = 0.0025;
+
+float3 decode(float3 c) { return pow(max(c, 0.0), 2.2); }
 
 constexpr sampler glowSampler(filter::linear, mip_filter::linear, address::clamp_to_edge);
 constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
 
-// The 16 light colours, worked out once per frame (lightsFragment) into a 16×1 texture.
+// The 16 light colours, worked out once per frame (lightsFragment) into a 17×1 texture.
 float3 lightColor(texture2d<float> lights, int i) {
     return lights.read(uint2(i, 0)).rgb;
 }
@@ -50,6 +60,47 @@ float3 screenHitRaw(float3 o, float3 d, constant CinemaUniforms &u) {
 
 bool onScreen(float3 h) {
     return h.z > 0.0 && h.x >= 0.0 && h.x <= 1.0 && h.y >= 0.0 && h.y <= 1.0;
+}
+
+// How far a view ray travels before it meets the floor, a wall or the screen.
+float rayLength(float3 o, float3 d, constant CinemaUniforms &u) {
+    float len = 40.0;
+    float dn = dot(d, u.floorPlane.xyz);
+    if (dn < -1e-4) len = min(len, (u.floorPlane.w - dot(o, u.floorPlane.xyz)) / dn);
+    float3 safe = select(d, float3(1e-6), abs(d) < 1e-6);
+    float3 exits = (select(u.room0.xyz, u.room1.xyz, safe > 0.0) - o) / safe;
+    len = min(len, min(exits.x, min(exits.y, exits.z)));
+    float3 hit = screenHitRaw(o, d, u);
+    if (onScreen(hit)) len = min(len, hit.z);
+    return max(len, 0.0);
+}
+
+// The theater's projector beam: a frustum from the port to the screen carrying the picture, seen
+// where the air scatters it. Marched in steps; it's only drawn at a quarter of the resolution.
+float3 projectorBeam(float3 o, float3 d, float len, constant CinemaUniforms &u, texture2d<float> glow) {
+    float3 P = u.beam.xyz;
+    float3 target = float3(0.0, u.screenY.x - u.screenY.y * 0.5, u.screen.x - u.screen.y);
+    float dist = length(target - P);
+    float3 axis = (target - P) / dist;
+    float3 right = normalize(cross(axis, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, axis);
+    float tanW = u.screenY.z * 0.5 / dist, tanH = u.screenY.y * 0.5 / dist;
+    const int steps = 24;
+    float dt = len / float(steps);
+    float3 sum = float3(0.0);
+    for (int i = 0; i < steps; i++) {
+        float3 v = o + d * ((float(i) + 0.5) * dt) - P;
+        float along = dot(v, axis);
+        if (along < 0.5) continue;
+        float x = dot(v, right) / (along * tanW), y = dot(v, up) / (along * tanH);
+        float inside = smoothstep(1.0, 0.9, max(abs(x), abs(y)));
+        if (inside <= 0.0) continue;
+        float3 col = glow.sample(glowSampler, float2(x * 0.5 + 0.5, 0.5 - y * 0.5), level(2.0)).rgb;
+        // The picture's light spreads out from the lens: brighter nearer the port.
+        float spread = min(dist * dist / (along * along), 25.0);
+        sum += col * inside * spread * dt;
+    }
+    return sum * beamGain * u.beam.w;
 }
 
 // hazeIntegral(), plus a lobe so the screen mostly lights the air in front of it.
@@ -138,7 +189,7 @@ fragment float4 screenFragment(Varyings in [[stage_in]], constant CinemaUniforms
     float2 q = abs((in.uv - 0.5) * size) - (size * 0.5 - r);
     float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
     float alpha = clamp(0.5 - sd / max(fwidth(sd), 1e-5), 0.0, 1.0);
-    return float4(tex.sample(linearSampler, in.uv).rgb, alpha);
+    return float4(decode(tex.sample(linearSampler, in.uv).rgb), alpha);
 }
 
 struct QuadOut {
@@ -154,18 +205,18 @@ vertex QuadOut fullscreenVertex(uint vid [[vertex_id]]) {
     return o;
 }
 
-// The light in the air along each view ray, up to the floor or the screen. It's smooth, so it's
-// drawn at a quarter of the resolution and added in compositeFragment.
+// The light in the air along each view ray, up to the floor, a wall or the screen, plus the
+// projector beam. It's smooth, so it's drawn at a quarter of the resolution and added in
+// compositeFragment.
 fragment float4 hazeFragment(QuadOut in [[stage_in]], constant CinemaUniforms &u [[buffer(0)]],
-                             texture2d<float> lights [[texture(0)]]) {
+                             texture2d<float> lights [[texture(0)]], texture2d<float> glow [[texture(1)]]) {
     float4 far = u.invViewProj * float4(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0, 1.0, 1.0);
     float3 eye = u.eye.xyz;
     float3 d = normalize(far.xyz / far.w - eye);
-    float len = 40.0;
-    if (d.y < -1e-4) len = min(len, (u.screenY.w - eye.y) / d.y);
-    float3 hit = screenHitRaw(eye, d, u);
-    if (onScreen(hit)) len = min(len, hit.z);
-    return float4(haze(eye, d, len, u, lights), 1.0);
+    float len = rayLength(eye, d, u);
+    float3 c = haze(eye, d, len, u, lights);
+    if (u.beam.w > 0.0) c += projectorBeam(eye, d, len, u, glow);
+    return float4(c, 1.0);
 }
 
 float dustHash(float i, float k) {
@@ -218,16 +269,18 @@ fragment float4 glowFragment(QuadOut in [[stage_in]], texture2d<float> src [[tex
     float3 c = float3(0.0);
     for (int y = 0; y < 4; y++) {
         for (int x = 0; x < 4; x++) {
-            c += src.sample(linearSampler, in.uv + (float2(x, y) - 1.5) * step).rgb;
+            c += decode(src.sample(linearSampler, in.uv + (float2(x, y) - 1.5) * step).rgb);
         }
     }
     return float4(mix(prev.sample(linearSampler, in.uv).rgb, c / 16.0, blend), 1.0);
 }
 
-// Texel i of the 16×1 light texture: the picture around light i, blurred.
+// Texel i of the 17×1 light texture: the picture around light i, blurred; texel 16 is the whole
+// picture's average colour.
 fragment float4 lightsFragment(QuadOut in [[stage_in]], constant CinemaUniforms &u [[buffer(0)]],
                                texture2d<float> glow [[texture(0)]]) {
-    int i = min(int(in.position.x), 15);
+    int i = int(in.position.x);
+    if (i >= 16) return float4(glow.sample(glowSampler, float2(0.5), level(8.0)).rgb, 1.0);
     return float4(glow.sample(glowSampler, float2(u.lightPos[i].w, u.lightNormal[i].w), level(4.0)).rgb, 1.0);
 }
 
@@ -248,7 +301,7 @@ fragment float4 bloomExtractFragment(QuadOut in [[stage_in]], texture2d<float> s
     }
     c /= 4.0;
     float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
-    return float4(c * smoothstep(0.45, 1.0, luma), 1.0);
+    return float4(c * smoothstep(0.3, 1.0, luma), 1.0);
 }
 
 // One direction of a separable Gaussian blur.
@@ -265,8 +318,9 @@ fragment float4 blurFragment(QuadOut in [[stage_in]], texture2d<float> src [[tex
     return float4(c, 1.0);
 }
 
-// Scene plus bloom, a soft shoulder above 0.8 (normal picture values pass unchanged), the fade-in,
-// and dither so the dark gradients don't band on the 8-bit display.
+// Scene plus bloom and haze, a soft shoulder above 0.85 (normal picture values pass nearly
+// unchanged), the fade-in, encoding for the display, and dither so the dark gradients don't band
+// on the 8-bit output.
 fragment float4 compositeFragment(QuadOut in [[stage_in]], texture2d<float> scene [[texture(0)]],
                                   texture2d<float> bloom [[texture(1)]], texture2d<float> haze [[texture(2)]],
                                   constant CinemaUniforms &u [[buffer(0)]]) {
@@ -275,9 +329,9 @@ fragment float4 compositeFragment(QuadOut in [[stage_in]], texture2d<float> scen
     c += bloom.sample(linearSampler, inEye(in.uv, bt)).rgb * bloomGain * u.misc.x;
     float2 ht = 1.0 / float2(haze.get_width(), haze.get_height());
     c += haze.sample(linearSampler, inEye(in.uv, ht)).rgb * step(1e-4, u.strength.y);
-    float3 over = max(c - 0.8, 0.0);
-    c = min(c, 0.8) + 0.2 * (1.0 - exp(-over / 0.2));
-    c *= u.misc.y;
+    float3 over = max(c - 0.85, 0.0);
+    c = min(c, 0.85) + 0.15 * (1.0 - exp(-over / 0.15));
+    c = pow(c * u.misc.y, 1.0 / 2.2);
     float n = fract(sin(dot(in.position.xy, float2(12.9898, 78.233))) * 43758.5453);
     return float4(c + (n - 0.5) / 255.0, 1.0);
 }

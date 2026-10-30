@@ -40,21 +40,21 @@ func stereoModeChecks() {
 }
 
 func cinemaSceneChecks() {
-    check("default row puts the screen 10 m straight ahead") {
-        let l = cinemaLayout(CinemaSettings(), sourceAspect: 16.0 / 9)
+    check("in the void, the default row puts the screen 10 m straight ahead") {
+        let l = cinemaLayout(CinemaSettings(environment: .void), sourceAspect: 16.0 / 9)
         expectNear(l.viewer.z - l.screenCenter.z, 10); expectNear(l.screenCenter.x, 0); expectNear(l.screenWidth, 6)
     }
-    check("rows step the screen from 7 to 13 m away") {
+    check("in the void, rows step the screen from 5 to 12 m away") {
         func distance(_ row: Int) -> Double {
-            let l = cinemaLayout(CinemaSettings(row: row), sourceAspect: nil)
+            let l = cinemaLayout(CinemaSettings(row: row, environment: .void), sourceAspect: nil)
             return l.viewer.z - l.screenCenter.z
         }
-        expectNear(distance(0), 7); expectNear(distance(6), 13); expectNear(distance(-3), 7)
+        expectNear(distance(0), 5); expectNear(distance(7), 12); expectNear(distance(-3), 5)
     }
     check("the screen sits near eye height and the floor below it, at any size") {
         for scale in [0.6, 1, 1.6] {
             for aspect in [0.9, 16.0 / 9, 2.39] {
-                let l = cinemaLayout(CinemaSettings(screenScale: scale), sourceAspect: aspect)
+                let l = cinemaLayout(CinemaSettings(screenScale: scale, environment: .void), sourceAspect: aspect)
                 expect(abs(l.screenCenter.y - l.viewer.y) < 0.5)
                 expect(l.floorY < l.screenBottom && l.floorY < l.viewer.y - 1)
                 // The viewer is inside the screen's curve, so it bends towards them.
@@ -64,12 +64,12 @@ func cinemaSceneChecks() {
     }
     check("settings clamp and ambience cycles") {
         let c = CinemaSettings(row: 12, screenScale: .nan, ambience: .full, ipd: 0.2).clamped
-        expectEqual(c.row, 6); expectNear(c.screenScale, 1); expectNear(c.ipd, 0.075); expectEqual(c.ambience, .full)
+        expectEqual(c.row, 7); expectNear(c.screenScale, 1); expectNear(c.ipd, 0.075); expectEqual(c.ambience, .full)
         expectEqual(Ambience.off.next, .soft); expectEqual(Ambience.soft.next, .full); expectEqual(Ambience.full.next, .off)
     }
     check("a missing or silly source aspect falls back to 16:9") {
-        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: nil).screenHeight, 3.375)
-        expectNear(cinemaLayout(CinemaSettings(), sourceAspect: 0).screenHeight, 3.375)
+        expectNear(cinemaLayout(CinemaSettings(environment: .void), sourceAspect: nil).screenHeight, 3.375)
+        expectNear(cinemaLayout(CinemaSettings(environment: .void), sourceAspect: 0).screenHeight, 3.375)
     }
 }
 
@@ -81,8 +81,8 @@ func cinemaCommandChecks() {
     }
     check("closer/farther step the distance, bigger/smaller scale the screen") {
         let s = CinemaSettings()
-        expectEqual(cinemaAdjusted(s, by: .nudgeDistance(-0.25))?.row, 2)
-        expectEqual(cinemaAdjusted(s, by: .nudgeDistance(0.25))?.row, 4)
+        expectEqual(cinemaAdjusted(s, by: .nudgeDistance(-0.25))?.row, 4)
+        expectEqual(cinemaAdjusted(s, by: .nudgeDistance(0.25))?.row, 6)
         expectNear(cinemaAdjusted(s, by: .resizeSelected(1.1))!.screenScale, 1.1)
         expectNear(cinemaAdjusted(s, by: .nudgeIPD(0.001))!.ipd, 0.064)
         expectEqual(cinemaAdjusted(s, by: .cycleAmbience)?.ambience, .full)
@@ -107,7 +107,7 @@ func cinemaCommandChecks() {
         try store.save(LayoutFile(panels: [], distance: 2, smoothFollow: false, lockedAxes: [],
                                   cinema: CinemaSettings(row: 9, screenScale: 1.2, ambience: .full, ipd: 0.06)))
         let c = store.load().cinema
-        expectEqual(c?.row, 6); expectEqual(c?.ambience, .full); expectNear(c?.ipd ?? 0, 0.06)
+        expectEqual(c?.row, 7); expectEqual(c?.ambience, .full); expectNear(c?.ipd ?? 0, 0.06)
     }
 }
 
@@ -138,9 +138,9 @@ func cinemaReviewFixChecks() {
         expectEqual(rateToSend(.hz120, mode: .panels), .hz120)
     }
     check("tall or square sources fit the screen box instead of growing taller") {
-        let square = cinemaLayout(CinemaSettings(), sourceAspect: 0.9)
+        let square = cinemaLayout(CinemaSettings(environment: .void), sourceAspect: 0.9)
         expectNear(square.screenHeight, 3.375); expectNear(square.screenWidth, 3.375 * 0.9)
-        let wide = cinemaLayout(CinemaSettings(), sourceAspect: 2.39)
+        let wide = cinemaLayout(CinemaSettings(environment: .void), sourceAspect: 2.39)
         expectNear(wide.screenWidth, 6); expectNear(wide.screenHeight, 6 / 2.39)
     }
 }

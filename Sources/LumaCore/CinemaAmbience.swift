@@ -3,17 +3,30 @@ import Foundation
 // The maths behind the cinema's glow. `CinemaShaders.swift` mirrors these functions on the GPU;
 // they live here so they can be checked without Metal.
 
-/// How strongly each effect is drawn, 0...1.
+/// How strongly each effect is drawn, 0...1. `house` (the theater's lights besides the screen)
+/// and `beam` (its projector beam) are 0 in the void.
 public struct AmbienceStrength: Equatable, Sendable {
     public var halo, haze, reflection, dust, bloom: Double
+    public var house = 0.0, beam = 0.0
 }
 
 extension Ambience {
+    /// In the void.
     public var strength: AmbienceStrength {
         switch self {
         case .off: AmbienceStrength(halo: 0, haze: 0, reflection: 0.3, dust: 0, bloom: 0)
         case .soft: AmbienceStrength(halo: 0.55, haze: 0.5, reflection: 0.7, dust: 0.5, bloom: 0.5)
         case .full: AmbienceStrength(halo: 1, haze: 1, reflection: 1, dust: 1, bloom: 1)
+        }
+    }
+
+    /// The theater has no halo or glossy floor; its ambience is house lights, haze and the beam.
+    public func strength(in environment: CinemaEnvironment) -> AmbienceStrength {
+        guard environment == .theater else { return strength }
+        return switch self {
+        case .off: AmbienceStrength(halo: 0, haze: 0, reflection: 0, dust: 0, bloom: 0.4, house: 0, beam: 0)
+        case .soft: AmbienceStrength(halo: 0, haze: 0.3, reflection: 0, dust: 0.4, bloom: 0.5, house: 0.25, beam: 0.3)
+        case .full: AmbienceStrength(halo: 0, haze: 0.7, reflection: 0, dust: 1, bloom: 0.6, house: 1, beam: 1)
         }
     }
 }

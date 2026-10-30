@@ -41,6 +41,11 @@ final class CinemaRenderer {
     private var dust = CinemaBox(center: .zero, size: Vec3(x: 1, y: 1, z: 1))
     private var floorBuffer, haloBuffer, screenBuffer: MTLBuffer?
 
+    /// The theater environment's hall and seats; nil if its shaders failed (the void still works).
+    private let theater: TheaterScene?
+    /// The theater's house lights, easing towards what the ambience asks for.
+    private var house = 1.0
+
     private let start = CACurrentMediaTime()
     private var lastFrame: Double?
     private let stats = ProcessInfo.processInfo.environment["LUMA_CINEMA_STATS"] == "1" ? GPUStats() : nil
@@ -53,7 +58,8 @@ final class CinemaRenderer {
     init?(device: MTLDevice, colorPixelFormat: MTLPixelFormat) {
         self.device = device
         do {
-            let lib = try device.makeLibrary(source: cinemaShaderSource, options: nil)
+            let lib = try device.makeLibrary(source: cinemaShaderSource + theaterShaderSource, options: nil)
+            theater = TheaterScene(device: device, library: lib)
             func pipeline(_ v: String, _ f: String, format: MTLPixelFormat = Self.sceneFormat, scene: Bool = false,
                           blend: Blend = .opaque) throws -> MTLRenderPipelineState {
                 let d = MTLRenderPipelineDescriptor()
@@ -103,7 +109,8 @@ final class CinemaRenderer {
                                                           height: Self.glowHeight, mipmapped: true)
         td.usage = [.renderTarget, .shaderRead]
         td.storageMode = .private
-        let ld = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.sceneFormat, width: cinemaLightColumns * cinemaLightRows,
+        // One texel per screen light, then the picture's average colour.
+        let ld = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: Self.sceneFormat, width: cinemaLightColumns * cinemaLightRows + 1,
                                                           height: 1, mipmapped: false)
         ld.usage = [.renderTarget, .shaderRead]
         ld.storageMode = .private
@@ -129,7 +136,9 @@ final class CinemaRenderer {
         if !glowCleared { clearGlow(cmd: cmd) }
         if let tex { updateGlow(from: tex, blend: glowBlend(dt: dt), cmd: cmd) }
         let glowTex = glow[glowIndex]
-        let strength = settings.ambience.strength
+        let inTheater = settings.environment == .theater && theater != nil
+        let strength = settings.ambience.strength(in: inTheater ? .theater : .void)
+        house += (houseLightTarget(strength.house, elapsed: elapsed) - house) * glowBlend(dt: dt, tau: 1.2)
         let fade = cinemaFade(elapsed: elapsed)
         let ea = eyeAspect(drawableWidth: w, drawableHeight: h)
         let proj = perspective(fovY: Float(verticalFOV(aspect: ea)), aspect: Float(ea), near: 0.05, far: 100)
@@ -141,6 +150,7 @@ final class CinemaRenderer {
         }
         var u = eyes[0].uniforms
         fullscreen(lightsPipeline, into: lightColors, textures: [glowTex], bytes: u, cmd: cmd)
+        if inTheater { theater?.prepare(cmd: cmd, uniforms: u) }
 
         let sp = MTLRenderPassDescriptor()
         sp.colorAttachments[0].texture = sceneMSAA
@@ -171,15 +181,19 @@ final class CinemaRenderer {
                 enc.drawPrimitives(type: type, vertexStart: 0, vertexCount: count)
             }
             let strip = (Self.screenSegments + 1) * 2
-            draw(floorPipeline, depthWrite, floorBuffer, [glowTex, lightColors], .triangle, 6)
-            if strength.halo > 0 { draw(haloPipeline, depthTest, haloBuffer, [glowTex], .triangleStrip, strip) }
+            if inTheater, let theater {
+                theater.draw(enc, uniforms: &u, depth: depthWrite, lights: lightColors)
+            } else {
+                draw(floorPipeline, depthWrite, floorBuffer, [glowTex, lightColors], .triangle, 6)
+                if strength.halo > 0 { draw(haloPipeline, depthTest, haloBuffer, [glowTex], .triangleStrip, strip) }
+            }
             if let tex { draw(screenPipeline, depthWrite, screenBuffer, [tex], .triangleStrip, strip) }
             if strength.dust > 0 { draw(dustPipeline, depthTest, nil, [lightColors], .point, dustCount) }
         }
         enc.endEncoding()
 
         // The haze is smooth, so it's drawn at a quarter of the size and added when compositing.
-        if strength.haze > 0 {
+        if strength.haze > 0 || strength.beam > 0 {
             let hp = MTLRenderPassDescriptor()
             hp.colorAttachments[0].texture = haze
             hp.colorAttachments[0].loadAction = .dontCare
@@ -187,6 +201,7 @@ final class CinemaRenderer {
             guard let he = cmd.makeRenderCommandEncoder(descriptor: hp) else { return }
             he.setRenderPipelineState(hazePipeline)
             he.setFragmentTexture(lightColors, index: 0)
+            he.setFragmentTexture(glowTex, index: 1)
             for (eye, (_, eu)) in zip(Eye.allCases, eyes) {
                 let vp = eyeViewport(eye, drawableWidth: haze.width, drawableHeight: haze.height)
                 he.setViewport(MTLViewport(originX: Double(vp.x), originY: 0, width: Double(vp.width), height: Double(vp.height),
@@ -210,7 +225,7 @@ final class CinemaRenderer {
         out.setFragmentTexture(sceneResolved, index: 0)
         // With bloom or haze off their textures aren't written this frame; the scene stands in, weighted by 0.
         out.setFragmentTexture(strength.bloom > 0 ? bloomA : sceneResolved, index: 1)
-        out.setFragmentTexture(strength.haze > 0 ? haze : sceneResolved, index: 2)
+        out.setFragmentTexture(strength.haze > 0 || strength.beam > 0 ? haze : sceneResolved, index: 2)
         out.setFragmentBytes(&u, length: u.count * MemoryLayout<Float>.stride, index: 0)
         out.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         out.endEncoding()
@@ -219,7 +234,8 @@ final class CinemaRenderer {
 
     private func uniforms(viewProj m: simd_float4x4, eye: Vec3, time: Double, fade: Double, dustPixels: Float) -> [Float] {
         guard let l = layout else { return [] }
-        let s = settings.ambience.strength
+        let inTheater = settings.environment == .theater && theater != nil
+        let s = settings.ambience.strength(in: inTheater ? .theater : .void)
         var u: [Float] = []
         for c in [m, m.inverse] { for v in [c.columns.0, c.columns.1, c.columns.2, c.columns.3] { u += [v.x, v.y, v.z, v.w] } }
         let dustMin = dust.center - dust.size * 0.5
@@ -232,6 +248,14 @@ final class CinemaRenderer {
               dust.size.x, dust.size.y, dust.size.z, 0].map { Float($0) }
         for li in lights { u += [li.position.x, li.position.y, li.position.z, li.u].map { Float($0) } }
         for li in lights { u += [li.normal.x, li.normal.y, li.normal.z, li.v].map { Float($0) } }
+        let lo = l.room.center - l.room.size * 0.5, hi = l.room.center + l.room.size * 0.5
+        let p = l.projector ?? .zero
+        u += [lo.x, lo.y, lo.z, inTheater ? 1 : 0,
+              hi.x, hi.y, hi.z, house,
+              l.floorNormal.x, l.floorNormal.y, l.floorNormal.z, l.floorOffset,
+              p.x, p.y, p.z, l.projector == nil ? 0 : s.beam].map { Float($0) }
+        let sv = theater?.shadowViewProj ?? matrix_identity_float4x4
+        for v in [sv.columns.0, sv.columns.1, sv.columns.2, sv.columns.3] { u += [v.x, v.y, v.z, v.w] }
         return u
     }
 

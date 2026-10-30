@@ -15,30 +15,41 @@ public enum Ambience: String, Codable, CaseIterable, Sendable {
     public var title: String { rawValue.capitalized }
 }
 
+/// Where the cinema's screen is: floating in the dark, or in a theater.
+public enum CinemaEnvironment: String, Codable, CaseIterable, Sendable {
+    case void, theater
+
+    public var next: CinemaEnvironment { self == .void ? .theater : .void }
+    public var title: String { rawValue.capitalized }
+}
+
 /// Everything about the cinema the user can change; saved with the layout.
 public struct CinemaSettings: Codable, Equatable, Sendable {
-    /// Viewing distance steps: row 0 is 7 m from the screen, each row 1 m farther.
-    public static let rows = 0...6
+    /// Seat rows (theater) or distance steps (void): row 0 is nearest the screen.
+    public static let rows = 0...7
     public static let scale = 0.6...1.6
 
     public var row: Int
     public var screenScale: Double
     public var ambience: Ambience
+    public var environment: CinemaEnvironment
     public var ipd: Double
 
-    public init(row: Int = 3, screenScale: Double = 1, ambience: Ambience = .soft, ipd: Double = IPD.standard) {
-        self.row = row; self.screenScale = screenScale; self.ambience = ambience; self.ipd = ipd
+    public init(row: Int = 5, screenScale: Double = 1, ambience: Ambience = .soft,
+                environment: CinemaEnvironment = .theater, ipd: Double = IPD.standard) {
+        self.row = row; self.screenScale = screenScale; self.ambience = ambience
+        self.environment = environment; self.ipd = ipd
     }
 
     public var clamped: CinemaSettings {
         CinemaSettings(row: min(max(row, Self.rows.lowerBound), Self.rows.upperBound),
                        screenScale: screenScale.isFinite ? clamp(screenScale, Self.scale) : 1,
-                       ambience: ambience,
+                       ambience: ambience, environment: environment,
                        ipd: ipd.isFinite ? clamp(ipd, IPD.range) : IPD.standard)
     }
 
     /// `lights` is how files saved by 0.2 (the box theater) stored it.
-    enum CodingKeys: String, CodingKey { case row, screenScale, ambience, lights, ipd }
+    enum CodingKeys: String, CodingKey { case row, screenScale, ambience, lights, environment, ipd }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,6 +58,7 @@ public struct CinemaSettings: Codable, Equatable, Sendable {
                   screenScale: try c.decode(Double.self, forKey: .screenScale),
                   ambience: try c.decodeIfPresent(Ambience.self, forKey: .ambience)
                       ?? (try c.decodeIfPresent(String.self, forKey: .lights)).flatMap { old[$0] } ?? .soft,
+                  environment: try c.decodeIfPresent(CinemaEnvironment.self, forKey: .environment) ?? .theater,
                   ipd: try c.decode(Double.self, forKey: .ipd))
     }
 
@@ -55,6 +67,7 @@ public struct CinemaSettings: Codable, Equatable, Sendable {
         try c.encode(row, forKey: .row)
         try c.encode(screenScale, forKey: .screenScale)
         try c.encode(ambience, forKey: .ambience)
+        try c.encode(environment, forKey: .environment)
         try c.encode(ipd, forKey: .ipd)
     }
 }
@@ -70,8 +83,8 @@ public struct CinemaBox: Equatable, Sendable {
     }
 }
 
-/// The cinema in metres: −z towards the screen, x right, y up; eyes at 1.2 m, the floor at or
-/// below 0 (lower for big screens).
+/// The cinema in metres: −z towards the screen, x right, y up. In the void the eyes are at
+/// 1.2 m and the floor at or below 0 (lower for big screens); see `TheaterSpec` for the theater.
 public struct CinemaLayout: Equatable, Sendable {
     public var viewer: Vec3
     public var screenCenter: Vec3
@@ -79,7 +92,15 @@ public struct CinemaLayout: Equatable, Sendable {
     public var screenHeight: Double
     /// The screen curves around a vertical axis this far behind it (behind the viewer too).
     public var screenRadius: Double
+    /// The void's floor height (the theater's front floor is at 0).
     public var floorY: Double
+    /// The space view rays can travel in, for the haze: endless in the void, the hall in the theater.
+    public var room: CinemaBox
+    /// The floor as a plane `floorNormal · p = floorOffset`; sloped along the theater's rows.
+    public var floorNormal: Vec3
+    public var floorOffset: Double
+    /// Where the projector beam starts, in the theater.
+    public var projector: Vec3?
 
     public var screenAxisZ: Double { screenCenter.z + screenRadius }
     /// Half the angle the screen spans around its axis.
@@ -89,7 +110,7 @@ public struct CinemaLayout: Equatable, Sendable {
 }
 
 private enum Cinema {
-    static let eyeHeight = 1.2, nearest = 7.0, rowStep = 1.0
+    static let eyeHeight = 1.2, nearest = 5.0, rowStep = 1.0
     /// The screen's centre sits a little above the eyes; the floor this far under its bottom edge,
     /// but never higher than a seated eye height below the eyes.
     static let screenLift = 0.25, floorGap = 0.3
@@ -102,15 +123,18 @@ public func cinemaLayout(_ s: CinemaSettings, sourceAspect: Double?) -> CinemaLa
     typealias C = Cinema
     let s = s.clamped
     let aspect = sourceAspect.flatMap { $0.isFinite && SceneLimits.aspect.contains($0) ? $0 : nil } ?? 16.0 / 9
+    if s.environment == .theater { return theaterLayout(s, aspect: aspect) }
     let boxW = C.screenWidth * s.screenScale, boxH = C.screenHeight * s.screenScale
     let width = min(boxW, boxH * aspect), height = width / aspect
     let distance = C.nearest + Double(s.row) * C.rowStep
     let centerY = C.eyeHeight + C.screenLift
+    let floorY = min(centerY - height / 2 - C.floorGap, 0)
     return CinemaLayout(viewer: Vec3(x: 0, y: C.eyeHeight, z: 0),
                         screenCenter: Vec3(x: 0, y: centerY, z: -distance),
                         screenWidth: width, screenHeight: height,
                         screenRadius: distance * C.curve,
-                        floorY: min(centerY - height / 2 - C.floorGap, 0))
+                        floorY: floorY, room: CinemaBox(center: .zero, size: Vec3(x: 2000, y: 2000, z: 2000)),
+                        floorNormal: Vec3(x: 0, y: 1, z: 0), floorOffset: floorY, projector: nil)
 }
 
 /// The cinema's answer to a command, or nil when the command isn't about the cinema.
@@ -122,6 +146,7 @@ public func cinemaAdjusted(_ s: CinemaSettings, by c: Command) -> CinemaSettings
     case .resizeSelected(let f): s.screenScale *= f
     case .nudgeIPD(let d): s.ipd += d
     case .cycleAmbience: s.ambience = s.ambience.next
+    case .cycleEnvironment: s.environment = s.environment.next
     default: return nil
     }
     return s.clamped

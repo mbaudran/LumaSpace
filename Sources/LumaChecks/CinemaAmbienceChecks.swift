@@ -37,7 +37,7 @@ func cinemaAmbienceChecks() {
 }
 
 func cinemaGeometryChecks() {
-    let l = cinemaLayout(CinemaSettings(), sourceAspect: 16.0 / 9)
+    let l = cinemaLayout(CinemaSettings(environment: .void), sourceAspect: 16.0 / 9)
     check("16 screen lights lie on the curved screen and face the viewer") {
         let lights = screenLights(l)
         expectEqual(lights.count, 16)

@@ -28,8 +28,8 @@ It's a small menu-bar app built on VITURE's official SDK, and it works without S
   Triple create the extra screens for you.
 - **🎮 Game mode.** ⌃⌥G hands the glasses over to Steam Big Picture at 120 Hz: fixed in
   view, with no added delay, shown only on the glasses.
-- **🎬 Cinema mode.** ⌃⌥C puts any window or display on a giant screen floating in the dark,
-  in 3D, with the movie's light glowing around it and reflecting on the floor.
+- **🎬 Cinema mode.** ⌃⌥C puts any window or display on a giant screen in 3D: in a premium
+  movie theater lit by the film, or floating in the dark with its light glowing around it.
 - **⌨️ Keyboard first.** Global shortcuts plus a command palette (⌃⌥Space) for everything.
 - **🪟 Any window or display.** Pin a single app window or your Mac's own screen as a panel.
 - **💡 Glasses controls.** Brightness, volume and refresh rate from the menu bar.
@@ -154,18 +154,26 @@ they were. Quitting LumaSpace or unplugging the glasses also ends game mode.
 
 ### Cinema mode
 
-**⌃⌥C** shows one window or display on a big curved screen floating in the dark, in 3D:
+**⌃⌥C** shows one window or display on a big screen in 3D:
 
 - It uses the selected screen's window or display; with none selected, you pick one.
   Play a movie in any app (browser, IINA, VLC…) and watch it there.
-- The glasses switch to 3D side-by-side mode, so the space has real depth. The movie's light
-  spills around the screen: a soft halo in its colours, a faint haze in the air, a few
-  specks of dust in the beam, and a glossy black floor that reflects the picture.
+- The glasses switch to 3D side-by-side mode, so the space has real depth.
+- **Cinema → Environment** picks where you watch:
+  - **Theater** (default): a premium cinema with stadium rows of black leather recliners,
+    acoustic fabric walls with warm LED strips, lit step lights and a dark carpet. The film
+    lights the hall: the seats catch its colours, they cast soft shadows on the rows behind,
+    and the room glows faintly with the picture. The house lights are up when you enter and
+    dim after a few seconds.
+  - **Void**: the screen floats in the dark and its light spills around it: a soft halo in
+    its colours, a faint haze, specks of dust in the beam, and a glossy black floor that
+    reflects the picture.
 - The lenses darken (electrochromic tint) so your real room fades away, and go back to how
   they were when cinema mode ends.
-- **⌃⌥=** / **⌃⌥-** move the screen closer or farther (7–13 m), **⌃⌥]** / **⌃⌥[** make it
-  bigger or smaller. **Cinema → Ambience** (menu bar or palette) switches between Off (just
-  the screen), Soft and Full.
+- **⌃⌥=** / **⌃⌥-** move you a row closer or farther (in the void: 5–12 m), **⌃⌥]** /
+  **⌃⌥[** make the screen bigger or smaller. **Cinema → Ambience** switches between Off
+  (just the screen's light), Soft and Full (theater: house lights up, haze and a projector
+  beam carrying the picture).
 - If the screen looks doubled, adjust **Cinema → Eye Distance** (55–75 mm).
 
 Press **⌃⌥C** again to get your screens back at the previous refresh rate. Quitting LumaSpace
@@ -220,6 +228,7 @@ LumaSpace is young. Here's what has been confirmed on real Luma glasses so far:
 | Game mode (120 Hz + Steam Big Picture) | ⏳ Not yet confirmed |
 | Cinema mode (3D switch, depth, exit back to 2D) | ⏳ Not yet confirmed |
 | Cinema ambience (lens tint on and restored, glow comfort, smooth at 90 Hz, floor reflection depth) | ⏳ Not yet confirmed |
+| Cinema theater (realism, seat-row depth, smooth at 90 Hz, house lights dimming) | ⏳ Not yet confirmed |
 | Unplug / replug recovery | ⏳ Not yet confirmed |
 
 Other VITURE models that the SDK accepts might work but are untested. Luma Ultra's 6DoF
@@ -270,6 +279,7 @@ Debug environment variables:
 | `LUMA_SIM_YAW=20` / `LUMA_SIM_PITCH=-25` | Turn / tilt the simulated head |
 | `LUMA_CINEMA=test` / `clip` | Start in cinema mode with colour bars on the screen (`clip`: moving, with a flash every 3 s) |
 | `LUMA_AMBIENCE=off` / `soft` / `full` | Override the cinema ambience for this run (not saved) |
+| `LUMA_ENVIRONMENT=theater` / `void`, `LUMA_ROW=0…7` | Override the cinema environment and row for this run (not saved) |
 | `LUMA_CINEMA_STATS=1` | Log the cinema's GPU time per frame once a second |
 | `LUMA_DEMO=triple-drag` / `palette` | Scripted demos for testing without input |
 | `LUMA_SDK_PATH=/path` | Load a specific `libglasses.dylib` |
@@ -279,7 +289,8 @@ Contributions are welcome. Please run `scripts/checks.sh` before opening a pull 
 ## License
 
 LumaSpace is released under the [MIT License](LICENSE). The VITURE SDK isn't part of this
-repo and isn't covered by it.
+repo and isn't covered by it. The theater's textures come from [ambientCG](https://ambientcg.com)
+under CC0 (public domain); see [Resources/Theater/CREDITS.md](Resources/Theater/CREDITS.md).
 
 ---
 

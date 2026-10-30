@@ -16,6 +16,7 @@ public enum Command: Hashable, Sendable {
     /// Eye distance change in metres.
     case nudgeIPD(Double)
     case cycleAmbience
+    case cycleEnvironment
     case addSource
     case newVirtualScreen
     case arrangeDisplays
@@ -39,6 +40,7 @@ public enum Command: Hashable, Sendable {
         case .toggleCinemaMode: "Cinema Mode"
         case .nudgeIPD(let d): d > 0 ? "IPD +" : "IPD −"
         case .cycleAmbience: "Ambience"
+        case .cycleEnvironment: "Environment"
         case .addSource: "Add Window or Display…"
         case .newVirtualScreen: "New Virtual Screen"
         case .arrangeDisplays: "Arrange Screens Like Panels"
@@ -64,6 +66,7 @@ public enum Command: Hashable, Sendable {
         case .toggleCinemaMode: ["vr", "movie", "theater", "3d", "film"]
         case .nudgeIPD: ["eyes", "depth", "stereo"]
         case .cycleAmbience: ["cinema", "ambient", "glow", "lights", "dark"]
+        case .cycleEnvironment: ["cinema", "theater", "void", "room", "scene"]
         case .addSource: ["window", "display", "screen", "new"]
         case .newVirtualScreen: ["monitor", "display", "extend", "add"]
         case .arrangeDisplays: ["align", "mouse", "order", "displays"]
@@ -82,7 +85,7 @@ public enum Command: Hashable, Sendable {
             + DisplayRate.allCases.map { .setRate($0) }
             + [.toggleSmoothFollow]
             + Axis.allCases.map { .toggleAxisLock($0) }
-            + [.toggleSnap, .toggleGameMode, .toggleCinemaMode, .cycleAmbience, .nudgeIPD(0.001), .nudgeIPD(-0.001), .addSource, .newVirtualScreen, .arrangeDisplays, .removeSelected, .groupAll, .ungroupSelected, .quit]
+            + [.toggleSnap, .toggleGameMode, .toggleCinemaMode, .cycleAmbience, .cycleEnvironment, .nudgeIPD(0.001), .nudgeIPD(-0.001), .addSource, .newVirtualScreen, .arrangeDisplays, .removeSelected, .groupAll, .ungroupSelected, .quit]
     }
 }
 

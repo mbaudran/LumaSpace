@@ -134,10 +134,12 @@ final class AppController: NSObject, NSApplicationDelegate {
             startCinema(source: nil, testPattern: bars)
             renderer.cinema?.testClip = cinemaTest == "clip"
         }
-        // `LUMA_AMBIENCE=off|soft|full` overrides the ambience for this run without saving it.
-        if let a = ProcessInfo.processInfo.environment["LUMA_AMBIENCE"].flatMap(Ambience.init(rawValue:)) {
-            renderer.cinema?.settings.ambience = a
-        }
+        // `LUMA_AMBIENCE=off|soft|full`, `LUMA_ENVIRONMENT=void|theater` and `LUMA_ROW=0…7` override the
+        // cinema for this run without saving it.
+        let env = ProcessInfo.processInfo.environment
+        if let a = env["LUMA_AMBIENCE"].flatMap(Ambience.init(rawValue:)) { renderer.cinema?.settings.ambience = a }
+        if let e = env["LUMA_ENVIRONMENT"].flatMap(CinemaEnvironment.init(rawValue:)) { renderer.cinema?.settings.environment = e }
+        if let r = env["LUMA_ROW"].flatMap(Int.init) { renderer.cinema?.settings.row = r }
         Demo.runIfRequested(self)
         palette.run = { [unowned self] c in self.perform(c) }
         hotkeys = Hotkeys { [unowned self] action in
@@ -257,8 +259,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// The single place commands run — menu, palette, shortcuts and keys all come here.
     func perform(_ c: Command) {
         // In the cinema, Closer/Farther and Bigger/Smaller set the distance and size of the screen;
-        // eye distance and ambience can be set any time.
-        let anyMode = switch c { case .nudgeIPD, .cycleAmbience: true; default: false }
+        // eye distance, ambience and environment can be set any time.
+        let anyMode = switch c { case .nudgeIPD, .cycleAmbience, .cycleEnvironment: true; default: false }
         if mode == .cinema || anyMode, let s = cinemaAdjusted(cinema, by: c) {
             cinema = s
             renderer.cinema?.settings = s
@@ -289,7 +291,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             if let id = scene.selectedID { scene.remove(id); capture.sync(panels: capturedPanels); syncVirtualScreens() }
         case .groupAll: scene.group(scene.panels.map(\.id))
         case .ungroupSelected: if let id = scene.selectedID { scene.ungroup(id) }
-        case .nudgeIPD, .cycleAmbience: break  // handled above
+        case .nudgeIPD, .cycleAmbience, .cycleEnvironment: break  // handled above
         case .quit: NSApp.terminate(nil)
         }
         markDirty()
