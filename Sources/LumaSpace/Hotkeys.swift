@@ -24,6 +24,7 @@ final class Hotkeys {
             HotkeySpec(keyCode: kVK_ANSI_RightBracket, shift: false, label: "⌃⌥]", action: .command(.resizeSelected(1.1))),
             HotkeySpec(keyCode: kVK_ANSI_LeftBracket, shift: false, label: "⌃⌥[", action: .command(.resizeSelected(1 / 1.1))),
             HotkeySpec(keyCode: kVK_ANSI_F, shift: false, label: "⌃⌥F", action: .command(.toggleSmoothFollow)),
+            HotkeySpec(keyCode: kVK_ANSI_L, shift: false, label: "⌃⌥L", action: .command(.toggleLockAllAxes)),
             HotkeySpec(keyCode: kVK_ANSI_A, shift: false, label: "⌃⌥A", action: .command(.addSource)),
             HotkeySpec(keyCode: kVK_ANSI_N, shift: false, label: "⌃⌥N", action: .command(.newVirtualScreen)),
             HotkeySpec(keyCode: kVK_ANSI_G, shift: false, label: "⌃⌥G", action: .command(.toggleGameMode)),

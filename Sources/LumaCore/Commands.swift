@@ -10,6 +10,8 @@ public enum Command: Hashable, Sendable {
     case setRate(DisplayRate)
     case toggleSmoothFollow
     case toggleAxisLock(Axis)
+    /// Locks yaw, pitch and roll together so the screens follow the head (0DoF).
+    case toggleLockAllAxes
     case toggleSnap
     case toggleGameMode
     case toggleCinemaMode
@@ -35,6 +37,7 @@ public enum Command: Hashable, Sendable {
         case .setRate(let r): "Refresh \(r.rawValue) Hz"
         case .toggleSmoothFollow: "Smooth Follow"
         case .toggleAxisLock(let a): "Lock \(a.rawValue.capitalized)"
+        case .toggleLockAllAxes: "Lock Screen to View"
         case .toggleSnap: "Snapping"
         case .toggleGameMode: "Game Mode"
         case .toggleCinemaMode: "Cinema Mode"
@@ -61,6 +64,7 @@ public enum Command: Hashable, Sendable {
         case .setRate: ["hz", "rate", "fps"]
         case .toggleSmoothFollow: ["follow", "drift"]
         case .toggleAxisLock: ["axis"]
+        case .toggleLockAllAxes: ["3dof", "0dof", "axis", "all", "fix", "pin", "freeze", "head"]
         case .toggleSnap: ["grid", "magnet"]
         case .toggleGameMode: ["steam", "big picture", "play", "120"]
         case .toggleCinemaMode: ["vr", "movie", "theater", "3d", "film"]
@@ -83,7 +87,7 @@ public enum Command: Hashable, Sendable {
                .adjustLevel(.brightness, 1), .adjustLevel(.brightness, -1),
                .adjustLevel(.volume, 1), .adjustLevel(.volume, -1)]
             + DisplayRate.allCases.map { .setRate($0) }
-            + [.toggleSmoothFollow]
+            + [.toggleSmoothFollow, .toggleLockAllAxes]
             + Axis.allCases.map { .toggleAxisLock($0) }
             + [.toggleSnap, .toggleGameMode, .toggleCinemaMode, .cycleAmbience, .cycleEnvironment, .nudgeIPD(0.001), .nudgeIPD(-0.001), .addSource, .newVirtualScreen, .arrangeDisplays, .removeSelected, .groupAll, .ungroupSelected, .quit]
     }

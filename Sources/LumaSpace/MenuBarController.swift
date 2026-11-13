@@ -92,6 +92,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         menu.addItem(command(.toggleSmoothFollow, checked: app.tracker.smoothFollow))
+        menu.addItem(command(.toggleLockAllAxes, checked: app.tracker.allAxesLocked))
         let lock = NSMenu()
         for a in Axis.allCases {
             lock.addItem(command(.toggleAxisLock(a), title: a.rawValue.capitalized, checked: app.tracker.lockedAxes.contains(a)))

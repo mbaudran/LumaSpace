@@ -281,6 +281,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .toggleSmoothFollow: tracker.smoothFollow.toggle()
         case .toggleAxisLock(let a):
             if tracker.lockedAxes.contains(a) { tracker.lockedAxes.remove(a) } else { tracker.lockedAxes.insert(a) }
+        case .toggleLockAllAxes: tracker.setAllAxesLocked(!tracker.allAxesLocked, raw: glasses.rawOrientation())
         case .toggleSnap: scene.snap.enabled.toggle()
         case .toggleGameMode: switchMode(to: outputMode(after: mode, toggling: .game))
         case .toggleCinemaMode: switchMode(to: outputMode(after: mode, toggling: .cinema))

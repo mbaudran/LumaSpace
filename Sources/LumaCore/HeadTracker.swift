@@ -22,6 +22,20 @@ public final class HeadTracker {
         anchor = .identity
     }
 
+    /// True when yaw, pitch and roll are all locked: the screens stay glued to the view (0DoF).
+    public var allAxesLocked: Bool { lockedAxes == Set(Axis.allCases) }
+
+    /// Locks or frees all three axes at once. Unlocking re-anchors the world where you are looking,
+    /// so the screens stay in front of you instead of jumping back to the old anchor.
+    public func setAllAxesLocked(_ locked: Bool, raw: Quat) {
+        if locked {
+            lockedAxes = Set(Axis.allCases)
+        } else {
+            lockedAxes = []
+            recenter(to: raw)
+        }
+    }
+
     public func update(raw: Quat, dt: Double) -> Quat {
         if reference == nil { recenter(to: raw) }
         var relative = (reference!.conjugate * raw).normalized

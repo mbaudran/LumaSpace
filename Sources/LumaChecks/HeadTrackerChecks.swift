@@ -39,4 +39,31 @@ func headTrackerChecks() {
         let r = t.update(raw: Quat(yaw: 1.2, pitch: 0, roll: 0), dt: 0.016).yawPitchRoll
         expectNear(r.yaw, 0)
     }
+    check("lock all axes glues the view in front") {
+        let t = HeadTracker()
+        t.recenter(to: .identity)
+        t.setAllAxesLocked(true, raw: .identity)
+        expect(t.allAxesLocked)
+        let r = t.update(raw: Quat(yaw: 0.9, pitch: -0.4, roll: 0.2), dt: 0.016).yawPitchRoll
+        expectNear(r.yaw, 0); expectNear(r.pitch, 0); expectNear(r.roll, 0)
+    }
+    check("unlocking all axes re-anchors where you look (no jump)") {
+        let t = HeadTracker()
+        t.recenter(to: .identity)
+        t.setAllAxesLocked(true, raw: .identity)
+        let turned = Quat(yaw: 1.4, pitch: 0, roll: 0)
+        _ = t.update(raw: turned, dt: 0.016)
+        t.setAllAxesLocked(false, raw: turned)
+        expect(!t.allAxesLocked)
+        expect(t.lockedAxes.isEmpty)
+        let r = t.update(raw: turned, dt: 0.016).yawPitchRoll
+        expectNear(r.yaw, 0)
+        let later = t.update(raw: Quat(yaw: 1.6, pitch: 0, roll: 0), dt: 0.016).yawPitchRoll
+        expectNear(later.yaw, 0.2)
+    }
+    check("one locked axis is not 'all locked'") {
+        let t = HeadTracker()
+        t.lockedAxes = [.yaw, .pitch]
+        expect(!t.allAxesLocked)
+    }
 }

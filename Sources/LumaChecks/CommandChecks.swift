@@ -25,4 +25,9 @@ func commandChecks() {
     check("keywords match: 'center' finds Recenter") {
         expect(paletteMatches("center", in: Command.all).contains(.recenter))
     }
+    check("Lock Screen to View is listed and findable") {
+        expect(Command.all.contains(.toggleLockAllAxes))
+        expectEqual(paletteMatches("lock screen", in: Command.all).first, .toggleLockAllAxes)
+        expect(paletteMatches("3dof", in: Command.all).contains(.toggleLockAllAxes))
+    }
 }

@@ -110,6 +110,7 @@ Everything lives under the **👓 icon** in the menu bar and in the **command pa
 | ⌃⌥= / ⌃⌥- | Screens closer / farther |
 | ⌃⌥] / ⌃⌥[ | Selected screen bigger / smaller |
 | ⌃⌥F | Smooth Follow on/off |
+| ⌃⌥L | Lock Screen to View on/off (all 3 axes: screens follow your head) |
 | ⌃⌥B / ⌃⌥⇧B | Brightness up / down |
 
 If another app already uses one of these, the menu shows "Shortcut … unavailable".
